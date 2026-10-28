@@ -159,7 +159,7 @@
       </div>
       <div class="fld"><div>Потоки CPU<small>больше — быстрее и горячее</small></div>
         <div class="seg" id="segThr">
-          <button data-v="3">3</button><button data-v="4">4</button>
+          <button data-v="2">2</button><button data-v="3">3</button><button data-v="4">4</button>
           <button data-v="6">6</button><button data-v="8">8</button>
         </div>
       </div>
@@ -357,13 +357,14 @@ function tick(){
   let b = '';
   (s.freq||[]).forEach(f=>{ b += bar(f.name, f.cur, f.maxHw, ' МГц'); });
   b += bar('CPU пакет', Math.round(t.soc||0), 100, '°');
-  b += bar('DDR', Math.round(t.ddr||0), 100, '°');
+  if((t.ddr||0) > 0) b += bar('DDR', Math.round(t.ddr), 100, '°');   // на SM6150 такого датчика нет
   b += bar('Батарея', Math.round(t.batt||0), 60, '°');
   if(s.ram) b += bar('RAM занято', s.ram.total - s.ram.free, s.ram.total, ' МБ');
   $('#bars').innerHTML = b;
-  const thr = (s.freq||[]).find(f=>f.name==='PRIME');
+  const fq = (s.freq||[]); const thr = fq[fq.length-1];              // последний кластер = самые быстрые ядра
   $('#memLine').textContent = 'load '+s.load+' · RAM '+(s.ram? (s.ram.total-s.ram.free)+'/'+s.ram.total+' МБ':'')+
-    (thr && thr.maxNow < thr.maxHw ? ' · троттлинг: максимум снижен '+thr.maxNow+' из '+thr.maxHw+' МГц' : '');
+    (s.profile? ' · профиль '+s.profile : '')+
+    (thr && thr.maxNow > 0 && thr.maxNow < thr.maxHw ? ' · троттлинг: максимум снижен '+thr.maxNow+' из '+thr.maxHw+' МГц' : '');
   if($('#set').classList.contains('show')){
     let st={}; try{ st = JSON.parse(native.status()); }catch(e){}
     $('#log').textContent = (st.log||'').slice(-1600);

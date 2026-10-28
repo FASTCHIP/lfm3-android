@@ -77,12 +77,16 @@
 
 ```bash
 git clone https://github.com/ggml-org/llama.cpp && cd llama.cpp
-cmake -B build-android -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK/build/cmake/android.toolchain.cmake \
-      -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-29 -DGGML_OPENMP=OFF \
-      -DGGML_CPU_ARM_ARCH="armv8.2-a+dotprod+i8mm+bf16+fp16" -DGGML_CPU_KLEIDIAI=ON \
-      -DLLAMA_CURL=OFF
-cmake --build build-android --target llama-server -j
+# универсальный движок: несколько ISA-вариантов внутри одной libggml-cpu.so,
+# выбор по железу в рантайме (i8mm на 8 Gen 1, dotprod на SM6150, базовый — остальное)
+cmake -B build-uni -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK/build/cmake/android.toolchain.cmake \
+      -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-29 -DCMAKE_BUILD_TYPE=Release \
+      -DGGML_NATIVE=OFF -DGGML_CPU_ALL_VARIANTS=ON -DGGML_CPU_KLEIDIAI=ON \
+      -DGGML_OPENMP=OFF -DLLAMA_CURL=OFF
+cmake --build build-uni --target llama-server -j
 ```
+Для одного устройства быстрее точная сборка (`-DGGML_CPU_ARM_ARCH="armv8.2-a+dotprod+i8mm+bf16+fp16"`
+для 8 Gen 1 / `armv8.2-a+dotprod+fp16` для SM6150) — универсальная стоит ~5% на Samsung.
 
 ```bash
 export JAVA_HOME=/path/to/jdk-21
@@ -92,6 +96,34 @@ bash scripts/build_apk.sh
 ```
 
 Скрипт соберёт `build/LFM3.apk` и сам создаст отладочный keystore.
+
+## Профили устройств
+
+Приложение одно, но дефолты подобраны под каждое железо (`Bridge.deviceProfile()`,
+по `Build.SOC_MODEL`; остальное — по объёму ОЗУ: ≥10 ГБ → 4t/32k, меньше → 2t/8k):
+
+| SoC | Устройство | ОЗУ | нити | контекст |
+|---|---|---|---|---|
+| SM8450 (8 Gen 1) | Galaxy S22 Ultra | 12 ГБ | 4 | 32768 |
+| SM6150 (SD 732G) | POCO X3 NFC | 6 ГБ | 2 | 8192 |
+
+Активный профиль виден в мониторинге («профиль SM6150»). Кластеры и термозоны
+определяются автоматически по `cpuinfo_max_freq` и `/sys/class/thermal` — на 2+6
+показывает LITTLE+BIG, на 1+3+4 все три; где нет `ddr`-датчика или читаемого
+`scaling_max_freq` (SM6150) — UI не падает, а скрывает/не показывает троттлинг.
+
+**POCO X3 NFC (SM6150, dotprod-сборка), `-pg 512,128`, t/s:**
+
+| `-t` | pp512 | tg128 |
+|---|---|---|
+| **2** | **44,3** | **10,6** |
+| 3 | 30,3 | 8,7 |
+| 4 | 40,1 | 8,6 |
+| 6 | 38,2 | 8,5 |
+
+Три грабли SM6150: без флага `dotprod` базовый NEON даёт 10 т/с (×4 разницы);
+`-t 3` проваливается (ядро A76 остаётся одно); `llama-bench` master — `-pg 512,128 -r N`,
+старый синтаксис `-nr` больше не принимается.
 
 ## Модель
 

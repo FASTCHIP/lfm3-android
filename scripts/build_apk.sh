@@ -40,12 +40,18 @@ fi
 
 BLD="$ROOT/build"
 LIBS="$BLD/libs/arm64-v8a"
+rm -rf "$BLD/libs"          # иначе в APK попадают .so от прошлых сборок (см. коммит 2.0)
 mkdir -p "$BLD/classes" "$BLD/dex" "$LIBS"
 
 # движок: llama-server кладём как lib*.so, чтобы Android распаковал его в nativeLibraryDir
-for f in libllama.so libggml.so libggml-base.so libggml-cpu.so libllama-common.so \
+# универсальная сборка (GGML_CPU_ALL_VARIANTS) несёт несколько libggml-cpu-android_*.so —
+# ggml сам dlopen'ет подходящий по железу; одиночные сборки кладут один libggml-cpu.so
+shopt -s nullglob
+for f in "$LLAMA_BUILD"/libggml-cpu*.so; do cp "$f" "$LIBS/"; done
+shopt -u nullglob
+for f in libllama.so libggml.so libggml-base.so libllama-common.so \
          libllama-server-impl.so libmtmd.so; do
-  cp "$LLAMA_BUILD/$f" "$LIBS/"
+  cp "$LLAMA_BUILD/$f" "$LIBS/" 2>/dev/null || true
 done
 cp "$LLAMA_BUILD/llama-server" "$LIBS/libllamaserver.so"
 chmod 755 "$LIBS/libllamaserver.so"

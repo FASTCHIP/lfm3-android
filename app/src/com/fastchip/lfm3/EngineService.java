@@ -123,7 +123,7 @@ public class EngineService extends Service {
         ((NotificationManager) getSystemService(NOTIFICATION_SERVICE)).createNotificationChannel(ch);
 
         String cfgJson = intent != null ? intent.getStringExtra(EXTRA_CFG) : null;
-        if (cfgJson == null) cfgJson = getSharedPreferences("cfg", 0).getString("json", "{}");
+        if (cfgJson == null) cfgJson = Bridge.readCfg(this).toString();  // профиль устройства; не "{}" (иначе стартует с жёсткими 32k/4)
 
         if (intent != null && "stop".equals(intent.getAction())) {
             startForeground(1, notification("остановлен"));

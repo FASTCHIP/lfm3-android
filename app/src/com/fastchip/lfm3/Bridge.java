@@ -49,6 +49,27 @@ public class Bridge {
 
     // ---------- настройки ----------
 
+    // ---------- профили устройств: дефолты под конкретную модель ----------
+    // {потоки, контекст, id}; id: 1=семейство ROME (POCO X3 NFC и др.), 2=SM8450, 0=общий по ОЗУ.
+    // Числа — по замерам llama-bench на живых устройствах (README, кросс-таблица).
+    static int[] deviceProfile() {
+        String id = "";
+        try { id += android.os.Build.SOC_MODEL; } catch (Throwable ignored) { }
+        try {
+            Object sp = Class.forName("android.os.SystemProperties");
+            id += " " + sp.getMethod("get", String.class).invoke(null, "ro.board.platform");
+        } catch (Throwable ignored) { }
+        id = id.toUpperCase();
+        // Qualcomm ROME: SM6150/7150/720G/730G/732G — POCO X3 NFC в пропах прячется за SM7150
+        if (id.contains("SM6150") || id.contains("SM7150") || id.contains("SM7250")) return new int[]{2, 8192, 1};
+        if (id.contains("SM8450")) return new int[]{4, 32768, 2};  // 12 ГБ
+        long kb = 0;
+        for (String line : read("/proc/meminfo").split("\n")) {
+            if (line.startsWith("MemTotal")) { kb = num(line.replaceAll("\\D", "")); break; }
+        }
+        return kb >= 10_000_000 ? new int[]{4, 32768, 0} : new int[]{2, 8192, 0};
+    }
+
     static JSONObject readCfg(Context c) {
         String s = c.getSharedPreferences("cfg", 0).getString("json", null);
         JSONObject o;
@@ -57,8 +78,9 @@ public class Bridge {
         } catch (Exception e) {
             o = new JSONObject();
         }
-        defaultIf(o, "ctx", 32768);
-        defaultIf(o, "threads", 4);
+        int[] prof = deviceProfile();
+        defaultIf(o, "ctx", prof[1]);
+        defaultIf(o, "threads", prof[0]);
         defaultIf(o, "kv", "q8_0");
         defaultIf(o, "fa", true);
         defaultIf(o, "np", 1);
@@ -250,41 +272,54 @@ public class Bridge {
             JSONObject o = new JSONObject();
             File base = new File("/sys/class/thermal");
             File[] zones = base.listFiles();
-            double cpu = 0, soc = 0, ddr = 0, batt = 0;
+            double big = 0, all = 0, cpuss = 0, ddr = 0, batt = 0;
             if (zones != null) {
                 for (File z : zones) {
                     String t = rd(z.getAbsolutePath() + "/type");
                     double v = tC(z.getAbsolutePath());
                     if (v <= 0) continue;
-                    if (t.startsWith("cpu-1-")) cpu = Math.max(cpu, v);
-                    else if (t.startsWith("cpuss-")) soc = Math.max(soc, v);
+                    // cpu-1-* — быстрые ядра (Qualcomm SM6150, Exynos), cpuss-* — пакет (Samsung);
+                    // ddr-датчика может не быть (SM6150) — UI скрывает полосу при 0
+                    if (t.startsWith("cpu-1-")) { big = Math.max(big, v); all = Math.max(all, v); }
+                    else if (t.startsWith("cpu")) all = Math.max(all, v);
+                    else if (t.startsWith("cpuss-")) cpuss = Math.max(cpuss, v);
                     else if (t.equals("ddr")) ddr = v;
                     else if (t.equals("battery")) batt = v;
                 }
             }
             JSONObject temps = new JSONObject();
-            temps.put("cpu", cpu);
-            temps.put("soc", soc);
+            temps.put("cpu", big > 0 ? big : all);
+            temps.put("soc", cpuss > 0 ? cpuss : all);
             temps.put("ddr", ddr);
             temps.put("batt", batt);
             o.put("temps", temps);
 
-            JSONArray fr = new JSONArray();
-            int[] cores = {0, 4, 7};
+            // кластеры: группы ядер по cpuinfo_max_freq от медленных к быстрым —
+            // работает и на 2+6 (SD 732G: LITTLE+BIG), и на 1+3+4 (8 Gen 1: +PRIME)
+            java.util.TreeMap<Long, Integer> rep = new java.util.TreeMap<>();
+            for (int i = 0; i < 16; i++) {
+                long maxHw = num(rd("/sys/devices/system/cpu/cpu" + i + "/cpufreq/cpuinfo_max_freq"));
+                if (maxHw <= 0) break;
+                rep.put(maxHw, i);
+            }
             String[] nm = {"LITTLE", "BIG", "PRIME"};
-            for (int i = 0; i < cores.length; i++) {
-                String p = "/sys/devices/system/cpu/cpu" + cores[i] + "/cpufreq/";
+            JSONArray fr = new JSONArray();
+            int n = Math.min(rep.size(), 3), k = 0;
+            for (java.util.Map.Entry<Long, Integer> e : rep.entrySet()) {
+                if (k >= n) break;
+                String p = "/sys/devices/system/cpu/cpu" + e.getValue() + "/cpufreq/";
                 long cur = num(rd(p + "scaling_cur_freq"));
                 long maxNow = num(rd(p + "scaling_max_freq"));
-                long maxHw = num(rd(p + "cpuinfo_max_freq"));
                 JSONObject c = new JSONObject();
-                c.put("name", nm[i]);
+                c.put("name", rep.size() == 1 ? "CPU" : nm[k]);
                 c.put("cur", Math.round(cur / 1000.0));
                 c.put("maxNow", Math.round(maxNow / 1000.0));
-                c.put("maxHw", Math.round(maxHw / 1000.0));
+                c.put("maxHw", Math.round(e.getKey() / 1000.0));
                 fr.put(c);
+                k++;
             }
             o.put("freq", fr);
+            o.put("profile", deviceProfile()[2] == 1 ? "ROME" : deviceProfile()[2] == 2 ? "SM8450" : "generic");
 
             long mt = 0, ma = 0;
             for (String line : read("/proc/meminfo").split("\n")) {
