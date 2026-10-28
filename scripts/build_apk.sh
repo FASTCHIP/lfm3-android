@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+set -e   # без этого ошибка javac молча превращает APK в старый dex прошлой сборки
 # Сборка APK без Gradle: aapt2 -> javac -> d8 -> zip -> zipalign -> apksigner.
 #
 # Требуется:

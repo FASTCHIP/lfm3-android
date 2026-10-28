@@ -56,7 +56,7 @@ public class Bridge {
         String id = "";
         try { id += android.os.Build.SOC_MODEL; } catch (Throwable ignored) { }
         try {
-            Object sp = Class.forName("android.os.SystemProperties");
+            Class<?> sp = Class.forName("android.os.SystemProperties");
             id += " " + sp.getMethod("get", String.class).invoke(null, "ro.board.platform");
         } catch (Throwable ignored) { }
         id = id.toUpperCase();

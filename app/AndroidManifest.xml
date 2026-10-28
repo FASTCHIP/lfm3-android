@@ -1,8 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    package="com.fastchip.lfm3"
-    android:versionCode="4"
-    android:versionName="1.3">
+    package="com.fastchip.lfm3">
+    <!-- versionCode/versionName задаёт scripts/build_apk.sh через aapt2 (в манифесте их быть не должно — они перебивают CLI) -->
 
     <uses-sdk android:minSdkVersion="29" android:targetSdkVersion="34" />
     <uses-permission android:name="android.permission.INTERNET" />
