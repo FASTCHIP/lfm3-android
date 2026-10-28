@@ -1,0 +1,522 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>LFM3</title>
+<style>
+  :root{ --bg:#0e1013; --card:#171a20; --line:#262b34; --fg:#e8eaee; --mut:#8b93a1;
+         --acc:#4c9aff; --ok:#3ecf8e; --warn:#c9a227; --bad:#e35d6a; }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;height:100%;overflow:hidden}
+  body{background:var(--bg);color:var(--fg);font:15px/1.45 -apple-system,Roboto,system-ui,sans-serif;
+       display:flex;flex-direction:column}
+  header{display:flex;align-items:center;gap:8px;padding:9px 12px;border-bottom:1px solid var(--line);
+         background:var(--card);flex:0 0 auto}
+  header b{font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:38vw}
+  #chips{display:flex;gap:6px;margin-left:auto;align-items:center}
+  .chip{font-size:11px;color:var(--mut);border:1px solid var(--line);border-radius:10px;
+        padding:2px 7px;white-space:nowrap}
+  .chip.on{color:var(--ok);border-color:#26543f}
+  .chip.hot{color:var(--bad);border-color:#5c2a30}
+  #gear{font-size:19px;color:var(--mut);padding:2px 4px}
+  #chat{flex:1;overflow-y:auto;padding:12px 12px 4px}
+  .m{max-width:94%;margin:0 0 10px;padding:9px 12px;border-radius:12px;white-space:pre-wrap;
+     word-break:break-word}
+  .u{background:#1d2430;margin-left:auto;border-bottom-right-radius:4px}
+  .a{background:var(--card);border:1px solid var(--line);border-bottom-left-radius:4px}
+  .a.err{border-color:#5c2a30}
+  .reas{font-size:12.5px;color:var(--mut);border-left:2px solid var(--line);padding:4px 0 4px 9px;
+        margin-bottom:8px;white-space:pre-wrap;max-height:120px;overflow:auto}
+  .meta{font-size:11px;color:var(--mut);margin-top:6px}
+  .thumb{display:block;max-width:100%;border-radius:8px;margin:6px 0}
+  #attachBar{display:none;gap:8px;padding:6px 12px;flex-wrap:wrap}
+  #attachBar.show{display:flex}
+  .att{display:flex;align-items:center;gap:6px;background:var(--card);border:1px solid var(--line);
+       border-radius:8px;padding:4px 8px;font-size:12px;max-width:46%}
+  .att img{width:26px;height:26px;object-fit:cover;border-radius:4px}
+  .att span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .att i{color:var(--bad);font-style:normal;padding:0 2px}
+  footer{flex:0 0 auto;border-top:1px solid var(--line);background:var(--card);padding:6px 8px 10px}
+  #tools{display:flex;gap:6px;margin-bottom:6px}
+  .tbtn{font-size:12px;color:var(--mut);border:1px solid var(--line);border-radius:9px;
+        padding:4px 9px;background:transparent}
+  #row{display:flex;gap:8px;align-items:flex-end}
+  textarea{flex:1;background:#0e131a;color:var(--fg);border:1px solid var(--line);border-radius:12px;
+           padding:10px 12px;font:15px/1.35 inherit;resize:none;max-height:130px;min-height:42px}
+  button.main{background:var(--acc);color:#06101f;border:0;border-radius:12px;padding:11px 15px;
+              font-weight:600;font-size:14px}
+  button.main.stop{background:var(--bad);color:#fff}
+  button.ghost{background:transparent;color:var(--fg);border:1px solid var(--line);border-radius:10px;
+               padding:9px 13px;font-size:13px}
+  /* ---------- настройки ---------- */
+  #set{position:fixed;inset:0;background:var(--bg);display:none;flex-direction:column;z-index:20}
+  #set.show{display:flex}
+  #setHead{display:flex;align-items:center;gap:10px;padding:11px 14px;border-bottom:1px solid var(--line);
+           background:var(--card);font-weight:600}
+  #setHead span{margin-left:auto;color:var(--acc)}
+  #setBody{flex:1;overflow-y:auto;padding:12px 12px 40px}
+  .sec{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px;margin-bottom:12px}
+  .sec h3{margin:0 0 10px;font-size:13px;color:var(--mut);font-weight:600;letter-spacing:.3px;text-transform:uppercase}
+  .fld{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:6px 0;font-size:13.5px}
+  .fld small{color:var(--mut);font-size:11.5px;display:block;margin-top:2px}
+  select,input[type=text],input[type=number]{background:#0e131a;color:var(--fg);border:1px solid var(--line);
+        border-radius:9px;padding:7px 9px;font-size:13.5px;max-width:52%}
+  .seg{display:flex;gap:5px;flex-wrap:wrap;justify-content:flex-end}
+  .seg button{background:#0e131a;border:1px solid var(--line);color:var(--mut);border-radius:8px;
+              padding:5px 9px;font-size:12.5px}
+  .seg button.on{background:#17324f;border-color:var(--acc);color:#cfe3ff}
+  .sw{width:44px;height:24px;border-radius:14px;background:#2a313c;position:relative;transition:.15s;flex:0 0 auto}
+  .sw.on{background:#2a5c46}
+  .sw::after{content:'';position:absolute;top:3px;left:3px;width:18px;height:18px;border-radius:50%;
+             background:#8b93a1;transition:.15s}
+  .sw.on::after{left:23px;background:var(--ok)}
+  .model{display:flex;align-items:center;gap:9px;padding:8px;border:1px solid var(--line);border-radius:10px;
+         margin-bottom:7px;font-size:13px}
+  .model.sel{border-color:var(--acc);background:#142033}
+  .model .nm{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .model .sz{color:var(--mut);font-size:11.5px;white-space:nowrap}
+  .model .del{color:var(--bad);font-size:15px;padding:0 4px}
+  .tag{font-size:10px;color:var(--ok);border:1px solid #26543f;border-radius:6px;padding:0 4px}
+  .row2{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
+  .row2 button{flex:1;min-width:120px}
+  .bars{display:flex;flex-direction:column;gap:9px;margin-top:4px}
+  .bar{font-size:12px}
+  .bar .lab{display:flex;justify-content:space-between;color:var(--mut);margin-bottom:3px}
+  .bar .tr{height:6px;background:#0e131a;border-radius:4px;overflow:hidden}
+  .bar .fl{height:100%;background:var(--acc);width:0}
+  .bar .fl.hot{background:var(--bad)}
+  #log{font:11px/1.4 ui-monospace,Menlo,monospace;color:var(--mut);white-space:pre-wrap;max-height:200px;
+       overflow:auto;background:#0b0e12;border:1px solid var(--line);border-radius:10px;padding:8px;margin-top:8px}
+  .hint{font-size:11.5px;color:var(--mut);margin-top:8px;line-height:1.4}
+  code{background:#0b0e12;border:1px solid var(--line);border-radius:5px;padding:0 4px;font-size:11.5px}
+  #toast{position:fixed;left:50%;bottom:84px;transform:translateX(-50%);background:#222a35;color:#fff;
+         font-size:13px;padding:8px 14px;border-radius:10px;opacity:0;transition:.2s;pointer-events:none;z-index:40}
+  #toast.show{opacity:1}
+</style>
+</head>
+<body>
+
+<header>
+  <b id="title">LFM3</b>
+  <div id="chips">
+    <div class="chip" id="cTemp">—°</div>
+    <div class="chip" id="cTok">— t/s</div>
+    <div class="chip" id="cNet">LAN</div>
+    <div class="chip" id="cEng">…</div>
+  </div>
+  <div id="gear">⚙</div>
+</header>
+
+<div id="chat"></div>
+<div id="attachBar"></div>
+
+<footer>
+  <div id="tools">
+    <button class="tbtn" id="bDoc">📎 документ</button>
+    <button class="tbtn" id="bImg">🖼 фото</button>
+    <button class="tbtn" id="bNew">＋ новый чат</button>
+  </div>
+  <div id="row">
+    <textarea id="in" rows="1" placeholder="Сообщение…"></textarea>
+    <button class="main" id="send">➤</button>
+  </div>
+</footer>
+
+<div id="set">
+  <div id="setHead">Настройки <span id="setClose">готово</span></div>
+  <div id="setBody">
+
+    <div class="sec">
+      <h3>Модель</h3>
+      <div id="models"></div>
+      <div class="row2">
+        <button class="ghost" id="bImport">Импорт .gguf</button>
+        <button class="ghost" id="bRefresh">Обновить</button>
+      </div>
+      <div class="hint" id="mdir"></div>
+      <div class="hint">Модели читаются из внутренней папки приложения (быстрый mmap). Кнопка «Импорт» копирует .gguf из любого места — Проводник, Загрузки, облако. Проектор <code>mmproj-*.gguf</code> подхватывается автоматически для VL-моделей.</div>
+    </div>
+
+    <div class="sec">
+      <h3>Запуск движка</h3>
+      <div class="fld"><div>Контекст<small>сколько текста держит в памяти</small></div>
+        <div class="seg" id="segCtx">
+          <button data-v="8192">8k</button><button data-v="32768">32k</button>
+          <button data-v="65536">64k</button><button data-v="131072">128k</button>
+          <button data-v="262144">256k</button>
+        </div>
+      </div>
+      <div class="fld"><div>Потоки CPU<small>больше — быстрее и горячее</small></div>
+        <div class="seg" id="segThr">
+          <button data-v="3">3</button><button data-v="4">4</button>
+          <button data-v="6">6</button><button data-v="8">8</button>
+        </div>
+      </div>
+      <div class="fld"><div>Тип KV-кэша<small>q8_0 — вдвое меньше памяти</small></div>
+        <select id="selKv"><option value="q8_0">q8_0</option><option value="f16">f16</option><option value="q4_0">q4_0</option></select>
+      </div>
+      <div class="fld"><div>Flash Attention<small>экономит память на длинном контексте</small></div>
+        <div class="sw on" id="swFa"></div>
+      </div>
+      <div class="fld"><div>Слотов запросов<small>параллельные диалоги</small></div>
+        <div class="seg" id="segNp"><button data-v="1">1</button><button data-v="2">2</button><button data-v="4">4</button></div>
+      </div>
+      <div class="fld"><div>mmap модели<small>выкл = загрузить в RAM целиком</small></div>
+        <div class="sw on" id="swMmp"></div>
+      </div>
+      <div class="fld"><div>Температура сэмплинга<small>0.3 точно, 1.0 креативно</small></div>
+        <div class="seg" id="segTemp">
+          <button data-v="0.3">0.3</button><button data-v="0.7">0.7</button><button data-v="1.0">1.0</button>
+        </div>
+      </div>
+      <div class="row2">
+        <button class="main" id="bApply">Применить и перезапустить</button>
+        <button class="ghost" id="bStop">Остановить</button>
+      </div>
+    </div>
+
+    <div class="sec">
+      <h3>Рассуждения</h3>
+      <div class="fld"><div>Думать перед ответом<small>LFM3 умеет reasoning; выкл = быстрее и короче</small></div>
+        <div class="sw on" id="swThink"></div>
+      </div>
+      <div class="fld"><div>Сохранять рассуждения в контексте<small>выкл = прошлые «мысли» вырезаются, экономит окно</small></div>
+        <div class="sw" id="swPreserve"></div>
+      </div>
+      <div class="fld"><div>Показывать блок рассуждений<small>только отображение, на скорость не влияет</small></div>
+        <div class="sw on" id="swShowReas"></div>
+      </div>
+      <div class="fld"><div>Лимит размышлений<small>0 = без лимита; обрезает «мысли» по токенам</small></div>
+        <div class="seg" id="segBudget">
+          <button data-v="0">0</button><button data-v="128">128</button>
+          <button data-v="256">256</button><button data-v="512">512</button><button data-v="1024">1024</button>
+        </div>
+      </div>
+      <div class="fld"><div>Лимит ответа<small>включая рассуждения</small></div>
+        <div class="seg" id="segMax">
+          <button data-v="512">512</button><button data-v="1024">1024</button>
+          <button data-v="2048">2048</button><button data-v="4096">4096</button>
+        </div>
+      </div>
+      <div class="hint">Параметры уходят в сервер как <code>chat_template_kwargs</code> — применяются сразу, перезапуск движка не нужен. Модели без поддержки рассуждений эти поля просто игнорируют.</div>
+    </div>
+
+    <div class="sec">
+      <h3>Доступ по сети</h3>
+      <div class="fld"><div>Слушать другие устройства<small>0.0.0.0 вместо 127.0.0.1</small></div>
+        <div class="sw" id="swLan"></div>
+      </div>
+      <div class="fld"><div>Порт</div><input type="number" id="inPort" value="8080"></div>
+      <div class="fld"><div>API-ключ<small>пусто = без авторизации</small></div><input type="text" id="inKey" placeholder="не задан"></div>
+      <div class="hint" id="netHint"></div>
+    </div>
+
+    <div class="sec">
+      <h3>Мониторинг</h3>
+      <div class="bars" id="bars"></div>
+      <div class="hint" id="memLine"></div>
+      <div id="log"></div>
+    </div>
+
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+const $ = s => document.querySelector(s);
+let cfg = {}, models = [], atts = [], busy = false, ctrl = null;
+let lastTok = 0, lastRate = 0;
+
+function toast(t){ const e=$('#toast'); e.textContent=t; e.classList.add('show');
+  clearTimeout(e._t); e._t=setTimeout(()=>e.classList.remove('show'),1800); }
+
+function api(path){ return 'http://127.0.0.1:' + (cfg.port||8080) + path; }
+function headers(){ const h={'Content-Type':'application/json'};
+  if(cfg.key) h['Authorization']='Bearer '+cfg.key; return h; }
+
+/* ---------- настройки ---------- */
+function loadCfg(){
+  try{ cfg = JSON.parse(native.cfg()); }catch(e){ cfg = {}; }
+  $('#selKv').value = cfg.kv || 'q8_0';
+  setSeg('#segCtx', String(cfg.ctx||32768));
+  setSeg('#segThr', String(cfg.threads||4));
+  setSeg('#segNp', String(cfg.np||1));
+  setSeg('#segTemp', String(cfg.temp||0.7));
+  setSeg('#segMax', String(cfg.maxTok||2048));
+  setSeg('#segBudget', String(cfg.thinkBudget||0));
+  sw('#swThink', cfg.think !== false);
+  sw('#swPreserve', !!cfg.preserve);
+  sw('#swShowReas', cfg.showReas !== false);
+  sw('#swFa', cfg.fa !== false);
+  sw('#swMmp', cfg.mmp !== false);
+  sw('#swLan', !!cfg.lan);
+  $('#inPort').value = cfg.port||8080;
+  $('#inKey').value = cfg.key||'';
+  netHint();
+}
+function setSeg(sel, v){
+  document.querySelectorAll(sel+' button').forEach(b => b.classList.toggle('on', b.dataset.v===v));
+}
+function segVal(sel, def){
+  const b = document.querySelector(sel+' button.on'); return b ? b.dataset.v : def;
+}
+function sw(sel, on){ $(sel).classList.toggle('on', !!on); }
+function swOn(sel){ return $(sel).classList.contains('on'); }
+
+function saveCfg(){
+  cfg.ctx = +segVal('#segCtx', '32768');
+  cfg.threads = +segVal('#segThr', '4');
+  cfg.np = +segVal('#segNp', '1');
+  cfg.temp = +segVal('#segTemp', '0.7');
+  cfg.maxTok = +segVal('#segMax', '2048');
+  cfg.thinkBudget = +segVal('#segBudget', '0');
+  cfg.think = swOn('#swThink');
+  cfg.preserve = swOn('#swPreserve');
+  cfg.showReas = swOn('#swShowReas');
+  cfg.kv = $('#selKv').value;
+  cfg.fa = swOn('#swFa');
+  cfg.mmp = swOn('#swMmp');
+  cfg.lan = swOn('#swLan');
+  cfg.port = +($('#inPort').value||8080);
+  cfg.key = $('#inKey').value.trim();
+  native.setCfg(JSON.stringify(cfg));
+  netHint();
+}
+
+function refreshModels(){
+  let d = {};
+  try{ d = JSON.parse(native.models()); }catch(e){}
+  models = d.items||[];
+  $('#mdir').textContent = 'Папка: ' + (d.dir||'');
+  const box = $('#models'); box.innerHTML='';
+  const real = models.filter(m=>!m.proj);
+  if(!real.length){ box.innerHTML='<div class="hint">Пока нет ни одной модели. Нажмите «Импорт .gguf».</div>'; }
+  real.forEach(m=>{
+    const el = document.createElement('div');
+    el.className='model'+(cfg.model===m.path?' sel':'');
+    el.innerHTML = '<div class="nm">'+m.name+(m.vl?' <span class="tag">VL</span>':'')+'</div>'+
+                   '<div class="sz">'+m.mb+' МБ</div><div class="del">✕</div>';
+    el.querySelector('.nm').onclick = () => { cfg.model = m.path; saveCfg(); refreshModels(); };
+    el.querySelector('.sz').onclick = () => { cfg.model = m.path; saveCfg(); refreshModels(); };
+    el.querySelector('.del').onclick = () => {
+      if(confirm('Удалить '+m.name+'?')){ const r = native.deleteModel(m.path); toast(r==='deleted'?'Удалено':'Не удалось'); refreshModels(); }
+    };
+    box.appendChild(el);
+  });
+  updateTitle();
+}
+
+function updateTitle(){
+  const m = models.find(x=>x.path===cfg.model);
+  $('#title').textContent = m ? m.name.replace(/\.gguf$/,'') : 'LFM3';
+  $('#cNet').textContent = cfg.lan ? ('LAN :'+(cfg.port||8080)) : 'LAN off';
+  $('#cNet').classList.toggle('on', !!cfg.lan);
+}
+
+function netHint(){
+  let n = {}; try{ n = JSON.parse(native.netInfo()); }catch(e){}
+  const url = n.url||'';
+  $('#netHint').innerHTML = (cfg.lan
+    ? 'URL для других устройств: <code>'+url+'</code><br>Проверка: <code>curl '+url+'/v1/models'+(cfg.key?' -H "Authorization: Bearer ***"':'')+'</code>'
+    : 'Сейчас движок слушает только этот телефон. Включите переключатель, чтобы открыть доступ по Wi-Fi (URL появится здесь).')
+    + '<br>Локально в приложении: <code>http://127.0.0.1:'+(cfg.port||8080)+'</code>';
+}
+
+/* ---------- мониторинг ---------- */
+function bar(label, cur, max, unit){
+  const p = max>0 ? Math.min(100, cur/max*100) : 0;
+  const hot = p>92;
+  return '<div class="bar"><div class="lab"><span>'+label+'</span><span>'+cur+(unit||'')+' / '+max+(unit||'')+'</span></div>'+
+         '<div class="tr"><div class="fl'+(hot?' hot':'')+'" style="width:'+p.toFixed(1)+'%"></div></div></div>';
+}
+function tick(){
+  let s = {};
+  try{ s = JSON.parse(native.sys()); }catch(e){}
+  if(!s.temps) return;
+  const t = s.temps;
+  const hot = (t.cpu||0) >= 65;
+  $('#cTemp').textContent = Math.round(t.cpu||0)+'°';
+  $('#cTemp').classList.toggle('hot', hot);
+  $('#cTok').textContent = lastRate ? (lastRate.toFixed(1)+' t/s') : '— t/s';
+  $('#cEng').textContent = s.listening ? 'работает' : (s.running?'загрузка':'стоп');
+  $('#cEng').classList.toggle('on', !!s.listening);
+
+  let b = '';
+  (s.freq||[]).forEach(f=>{ b += bar(f.name, f.cur, f.maxHw, ' МГц'); });
+  b += bar('CPU пакет', Math.round(t.soc||0), 100, '°');
+  b += bar('DDR', Math.round(t.ddr||0), 100, '°');
+  b += bar('Батарея', Math.round(t.batt||0), 60, '°');
+  if(s.ram) b += bar('RAM занято', s.ram.total - s.ram.free, s.ram.total, ' МБ');
+  $('#bars').innerHTML = b;
+  const thr = (s.freq||[]).find(f=>f.name==='PRIME');
+  $('#memLine').textContent = 'load '+s.load+' · RAM '+(s.ram? (s.ram.total-s.ram.free)+'/'+s.ram.total+' МБ':'')+
+    (thr && thr.maxNow < thr.maxHw ? ' · троттлинг: максимум снижен '+thr.maxNow+' из '+thr.maxHw+' МГц' : '');
+  if($('#set').classList.contains('show')){
+    let st={}; try{ st = JSON.parse(native.status()); }catch(e){}
+    $('#log').textContent = (st.log||'').slice(-1600);
+  }
+}
+setInterval(tick, 3000);
+
+/* ---------- вложения ---------- */
+function renderAtts(){
+  const bar = $('#attachBar'); bar.innerHTML='';
+  bar.classList.toggle('show', atts.length>0);
+  atts.forEach((a,i)=>{
+    const d = document.createElement('div'); d.className='att';
+    d.innerHTML = (a.kind==='img' ? '<img src="'+a.dataUrl+'">' : '📄') + '<span>'+a.name+'</span><i>✕</i>';
+    d.querySelector('i').onclick = () => { atts.splice(i,1); renderAtts(); };
+    bar.appendChild(d);
+  });
+}
+
+window.__native = function(payload){
+  let p={}; try{ p = JSON.parse(payload); }catch(e){ return; }
+  if(p.event==='models'){ refreshModels(); toast('Список моделей обновлён'); return; }
+  if(p.event==='attach'){
+    if(p.error){ toast(p.error); return; }
+    atts.push(p); renderAtts();
+    toast(p.kind==='img' ? 'Фото добавлено' : 'Документ добавлен: '+Math.round((p.text||'').length/1000)+' тыс. симв.');
+  }
+};
+window.__back = function(){
+  if($('#set').classList.contains('show')){ $('#set').classList.remove('show'); native.backConsumed(); return; }
+  if(ctrl){ ctrl.abort(); toast('Остановлено'); native.backConsumed(); }
+};
+
+/* ---------- чат ---------- */
+function bubble(role, text){
+  const d = document.createElement('div');
+  d.className='m '+(role==='user'?'u':'a');
+  d.textContent = text;
+  $('#chat').appendChild(d); $('#chat').scrollTop = 1e9;
+  return d;
+}
+function addUserMsg(text, imgs){
+  const d = document.createElement('div');
+  d.className='m u';
+  (imgs||[]).forEach(u=>{ const i=document.createElement('img'); i.className='thumb'; i.src=u; d.appendChild(i); });
+  const s = document.createElement('div'); s.textContent = text; d.appendChild(s);
+  $('#chat').appendChild(d); $('#chat').scrollTop = 1e9;
+}
+
+async function send(){
+  if(busy) return;
+  const text = $('#in').value.trim();
+  if(!text && !atts.length) return;
+  const model = models.find(m=>m.path===cfg.model);
+  const vl = model && model.vl;
+  const imgs = atts.filter(a=>a.kind==='img');
+  if(imgs.length && !vl){ toast('Фото понимает только VL-модель (LFM3-VL-2B). Сейчас выбрана текстовая.'); }
+  const useImg = vl ? imgs.map(a=>a.dataUrl) : [];
+
+  let content = text;
+  atts.filter(a=>a.kind==='doc').forEach(a=>{
+    const t = a.text.length > 12000 ? a.text.slice(0,12000)+'\n[…обрезано]' : a.text;
+    content = 'Документ «'+a.name+'»:\n```\n'+t+'\n```\n\n' + content;
+  });
+
+  const msgs = history.concat([{role:'user', content: content}]);
+  renderUser(content, useImg, text);
+  $('#in').value=''; $('#in').style.height='42px';
+  atts=[]; renderAtts();
+
+  const out = bubble('assistant','…');
+  const reas = document.createElement('div'); reas.className='reas'; reas.style.display='none';
+  out.insertBefore(reas, out.firstChild);
+  const meta = document.createElement('div'); meta.className='meta'; out.appendChild(meta);
+
+  busy = true; ctrl = new AbortController();
+  $('#send').textContent='■'; $('#send').classList.add('stop');
+  const t0 = performance.now(); let nTok=0, acc='', rs='', firstAt=0;
+  try{
+    const body = {messages: msgs, stream: true, temperature: cfg.temp||0.7,
+      max_tokens: cfg.maxTok||2048,
+      chat_template_kwargs: {enable_thinking: cfg.think !== false, preserve_thinking: !!cfg.preserve}};
+    if(cfg.thinkBudget > 0) body.reasoning_budget_tokens = cfg.thinkBudget;
+    if(useImg.length){
+      body.messages[body.messages.length-1] = {role:'user', content:
+        [{type:'text', text: content||'Опиши изображение.'}].concat(useImg.map(u=>({type:'image_url', image_url:{url:u}})))};
+    }
+    const r = await fetch(api('/v1/chat/completions'), {method:'POST', headers: headers(),
+      body: JSON.stringify(body), signal: ctrl.signal});
+    if(!r.ok){ throw new Error('HTTP '+r.status+' '+(await r.text()).slice(0,200)); }
+    const rd = r.body.getReader(); const dec = new TextDecoder(); let buf='';
+    while(true){
+      const {value, done} = await rd.read(); if(done) break;
+      buf += dec.decode(value, {stream:true});
+      const lines = buf.split('\n'); buf = lines.pop();
+      for(const line of lines){
+        if(!line.startsWith('data:')) continue;
+        const p = line.slice(5).trim(); if(p==='[DONE]') continue;
+        let j; try{ j = JSON.parse(p); }catch(e){ continue; }
+        const d = j.choices?.[0]?.delta || {};
+        if(d.reasoning_content){ rs += d.reasoning_content; if(!firstAt) firstAt=performance.now(); nTok++;
+          if(cfg.showReas !== false){ reas.style.display='block'; reas.textContent = rs; reas.scrollTop=1e9; } }
+        if(d.content){ acc += d.content; if(!firstAt) firstAt=performance.now(); nTok++;
+          out.childNodes[out.childNodes.length-2].textContent = acc; }
+        $('#chat').scrollTop = 1e9;
+      }
+    }
+    const dt = (performance.now()-t0)/1000;
+    lastRate = nTok/dt; lastTok = nTok;
+    meta.textContent = nTok+' ток · '+lastRate.toFixed(1)+' t/s · '+dt.toFixed(1)+' c';
+    history.push({role:'user', content: content});
+    history.push({role:'assistant', content: acc});
+  }catch(e){
+    if(e.name==='AbortError'){ meta.textContent='остановлено'; }
+    else { out.classList.add('err'); meta.textContent = 'ошибка: '+e.message;
+           toast('Движок не ответил: '+e.message); }
+    if(acc){ history.push({role:'assistant', content: acc}); }
+  }finally{
+    busy=false; ctrl=null; $('#send').textContent='➤'; $('#send').classList.remove('stop');
+  }
+}
+
+let history = [];
+function renderUser(content, imgs, origText){
+  const d = document.createElement('div'); d.className='m u';
+  imgs.forEach(u=>{ const i=document.createElement('img'); i.className='thumb'; i.src=u; d.appendChild(i); });
+  const s = document.createElement('div');
+  s.textContent = origText ? origText : content;
+  d.appendChild(s);
+  $('#chat').appendChild(d); $('#chat').scrollTop=1e9;
+}
+
+/* ---------- события ---------- */
+$('#send').onclick = () => { if(ctrl){ ctrl.abort(); return; } send(); };
+$('#in').addEventListener('input', e => {
+  e.target.style.height='auto'; e.target.style.height = Math.min(130, e.target.scrollHeight)+'px';
+});
+$('#bDoc').onclick = () => { if(atts.length>=4) return toast('Максимум 4 вложения'); native.pickDoc(); };
+$('#bImg').onclick = () => { if(atts.length>=4) return toast('Максимум 4 вложения'); native.pickImage(); };
+$('#bNew').onclick = () => { history=[]; $('#chat').innerHTML=''; toast('Новый чат'); };
+$('#gear').onclick = () => { $('#set').classList.add('show'); refreshModels(); tick(); };
+$('#setClose').onclick = () => { $('#set').classList.remove('show'); saveCfg(); };
+$('#bImport').onclick = () => native.importModel();
+$('#bRefresh').onclick = () => refreshModels();
+document.querySelectorAll('.seg button').forEach(b => b.onclick = () => {
+  setSeg('#'+b.parentElement.id, b.dataset.v); saveCfg();
+});
+$('#selKv').onchange = saveCfg;
+document.querySelectorAll('.sw').forEach(el => el.onclick = () => {
+  el.classList.toggle('on'); saveCfg(); updateTitle();
+});
+$('#inPort').onchange = saveCfg;
+$('#inKey').onchange = saveCfg;
+$('#bApply').onclick = () => {
+  saveCfg();
+  toast('Перезапуск движка…');
+  native.stop();
+  setTimeout(()=>{ native.start(); }, 900);
+  $('#set').classList.remove('show');
+};
+$('#bStop').onclick = () => { native.stop(); toast('Движок остановлен'); };
+
+loadCfg(); refreshModels(); tick();
+setTimeout(()=>{ if(!models.length) $('#set').classList.add('show'); }, 400);
+</script>
+</body>
+</html>
