@@ -18,8 +18,25 @@ JAVA_HOME="${JAVA_HOME:?укажите JAVA_HOME (JDK 21)}"
 ANDROID_SDK="${ANDROID_SDK:?укажите ANDROID_SDK}"
 LLAMA_BUILD="${LLAMA_BUILD:?укажите LLAMA_BUILD — каталог bin с собранным llama.cpp}"
 
+# aapt2/d8/javac — нативные exe: они не понимают MSYS-пути вида /c/..., переводим в C:/...
+if command -v cygpath >/dev/null 2>&1; then
+  ROOT="$(cygpath -m "$ROOT")"
+  JAVA_HOME="$(cygpath -m "$JAVA_HOME")"
+  ANDROID_SDK="$(cygpath -m "$ANDROID_SDK")"
+  LLAMA_BUILD="$(cygpath -m "$LLAMA_BUILD")"
+fi
+
 BT="$ANDROID_SDK/build-tools/34.0.0"
 JAR="$ANDROID_SDK/platforms/android-34/android.jar"
+JAVAC="$JAVA_HOME/bin/javac"
+KEYTOOL="$JAVA_HOME/bin/keytool"
+# на Windows в build-tools лежат .bat-обёртки вместо бинарников
+if [ -f "$BT/d8.bat" ]; then
+  D8="$BT/d8.bat"; SIGNER="$BT/apksigner.bat"; ZIPALIGN="$BT/zipalign.exe"
+else
+  D8="$BT/d8"; SIGNER="$BT/apksigner"; ZIPALIGN="$BT/zipalign"
+fi
+[ -x "$BT/aapt2.exe" ] && AAPT2="$BT/aapt2.exe" || AAPT2="$BT/aapt2"
 
 BLD="$ROOT/build"
 LIBS="$BLD/libs/arm64-v8a"
@@ -33,16 +50,16 @@ done
 cp "$LLAMA_BUILD/llama-server" "$LIBS/libllamaserver.so"
 chmod 755 "$LIBS/libllamaserver.so"
 
-"$BT/aapt2" link -o "$BLD/base.apk" -I "$JAR" \
+"$AAPT2" link -o "$BLD/base.apk" -I "$JAR" \
   --manifest "$ROOT/app/AndroidManifest.xml" -A "$ROOT/app/assets" \
   --min-sdk-version 29 --target-sdk-version 34 \
   --version-code "${VERSION_CODE:-1}" --version-name "${VERSION_NAME:-1.0}"
 
-PATH="$JAVA_HOME/bin:$PATH" javac -source 17 -target 17 -nowarn -classpath "$JAR" \
+"$JAVAC" -source 17 -target 17 -nowarn -classpath "$JAR" \
   -d "$BLD/classes" $(find "$ROOT/app/src" -name '*.java') 2>&1 \
   | grep -vE "bootstrap class path|deprecat" || true
 
-"$BT/d8" --lib "$JAR" --min-api 29 --output "$BLD/dex" $(find "$BLD/classes" -name '*.class')
+"$D8" --lib "$JAR" --min-api 29 --output "$BLD/dex" $(find "$BLD/classes" -name '*.class')
 
 python - "$BLD/base.apk" "$BLD/dex/classes.dex" "$LIBS" <<'PY'
 import sys, zipfile, os
@@ -55,13 +72,13 @@ with zipfile.ZipFile(apk, 'a', zipfile.ZIP_DEFLATED) as z:
             z.write(p, 'lib/' + os.path.relpath(p, libs).replace('\\', '/'))
 PY
 
-"$BT/zipalign" -f -p 4 "$BLD/base.apk" "$BLD/aligned.apk"
+"$ZIPALIGN" -f -p 4 "$BLD/base.apk" "$BLD/aligned.apk"
 KS="$ROOT/debug.keystore"
 if [ ! -f "$KS" ]; then
-  PATH="$JAVA_HOME/bin:$PATH" keytool -genkeypair -keystore "$KS" -storepass android -keypass android \
+  "$KEYTOOL" -genkeypair -keystore "$KS" -storepass android -keypass android \
     -alias app -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=LFM3" >/dev/null 2>&1
 fi
-"$BT/apksigner" sign --ks "$KS" --ks-pass pass:android --key-pass pass:android \
+"$SIGNER" sign --ks "$KS" --ks-pass pass:android --key-pass pass:android \
   --out "$BLD/LFM3.apk" "$BLD/aligned.apk"
-"$BT/apksigner" verify "$BLD/LFM3.apk"
+"$SIGNER" verify "$BLD/LFM3.apk"
 ls -lh "$BLD/LFM3.apk"
