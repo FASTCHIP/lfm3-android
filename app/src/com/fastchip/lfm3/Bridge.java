@@ -25,6 +25,7 @@ import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.io.RandomAccessFile;
 import java.net.Inet4Address;
 import java.net.InetAddress;
 import java.net.NetworkInterface;
@@ -38,6 +39,8 @@ public class Bridge {
     static final int REQ_DOC = 11;
     static final int REQ_IMG = 12;
     static final int REQ_GGUF = 13;
+
+    private File pdfFile;   // последний выбранный PDF (копия в cache для pdf.js)
 
     private final Activity act;
     private final Handler ui = new Handler(Looper.getMainLooper());
@@ -335,20 +338,74 @@ public class Bridge {
         act.startActivityForResult(i, REQ_IMG);
     }
 
+    // ---------- PDF: отдаём байты в pdf.js порциями ----------
+
+    @JavascriptInterface
+    public long pdfSize() {
+        return pdfFile != null && pdfFile.exists() ? pdfFile.length() : 0;
+    }
+
+    @JavascriptInterface
+    public String pdfChunk(int off, int len) {
+        if (pdfFile == null || !pdfFile.exists()) return "";
+        try (RandomAccessFile raf = new RandomAccessFile(pdfFile, "r")) {
+            long left = raf.length() - off;
+            if (left <= 0) return "";
+            int n = (int) Math.min(len, left);
+            byte[] buf = new byte[n];
+            raf.seek(off);
+            int got = raf.read(buf);
+            if (got <= 0) return "";
+            return Base64.encodeToString(buf, 0, got, Base64.NO_WRAP);
+        } catch (Exception e) {
+            Log.w("lfm3", "pdfChunk: " + e);
+            return "";
+        }
+    }
+
+    private long sizeOf(Uri uri) {
+        try (Cursor c = act.getContentResolver().query(uri, null, null, null, null)) {
+            if (c != null && c.moveToFirst()) {
+                int i = c.getColumnIndex(OpenableColumns.SIZE);
+                if (i >= 0 && !c.isNull(i)) return c.getLong(i);
+            }
+        } catch (Exception ignored) {}
+        return 0;
+    }
+
     void onResult(int req, int res, Intent data) {
         if (res != Activity.RESULT_OK || data == null || data.getData() == null) return;
         final Uri uri = data.getData();
         final String name = displayName(uri);
         if (req == REQ_DOC) {
             new Thread(() -> {
-                String text = null, err = null;
+                long size = sizeOf(uri);
+                JSONObject o = new JSONObject();
                 try {
-                    text = readText(uri, 300000);
-                    if (text == null || text.isEmpty()) err = "не текст: " + name;
+                    o.put("event", "attach");
+                    o.put("name", name);
+                    o.put("bytes", size);
+                    if (name.toLowerCase().endsWith(".pdf")) {
+                        File dst = new File(act.getCacheDir(), "attach.pdf");
+                        copy(uri, dst);
+                        pdfFile = dst;
+                        o.put("kind", "pdf");
+                        o.put("bytes", dst.length());
+                    } else {
+                        Extract.Res r = Extract.extract(act, uri, name, size);
+                        if (r.error != null) {
+                            o.put("error", r.error);
+                        } else {
+                            o.put("kind", r.kind);
+                            o.put("text", r.text);
+                            o.put("chars", r.chars);
+                            o.put("detail", r.detail);
+                        }
+                    }
                 } catch (Exception e) {
-                    err = "ошибка чтения: " + e.getMessage();
+                    try { o.put("error", "ошибка чтения: " + e.getMessage()); } catch (Exception ignored) {}
                 }
-                callJs(json("doc", name, text, null, err));
+                callJs(o.toString());
             }).start();
         } else if (req == REQ_IMG) {
             new Thread(() -> {

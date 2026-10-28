@@ -61,7 +61,7 @@ chmod 755 "$LIBS/libllamaserver.so"
 
 "$D8" --lib "$JAR" --min-api 29 --output "$BLD/dex" $(find "$BLD/classes" -name '*.class')
 
-python - "$BLD/base.apk" "$BLD/dex/classes.dex" "$LIBS" <<'PY'
+python - "$BLD/base.apk" "$BLD/dex/classes.dex" "$BLD/libs" <<'PY'
 import sys, zipfile, os
 apk, dex, libs = sys.argv[1], sys.argv[2], sys.argv[3]
 with zipfile.ZipFile(apk, 'a', zipfile.ZIP_DEFLATED) as z:

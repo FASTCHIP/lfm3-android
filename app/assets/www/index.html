@@ -33,7 +33,17 @@
   #attachBar{display:none;gap:8px;padding:6px 12px;flex-wrap:wrap}
   #attachBar.show{display:flex}
   .att{display:flex;align-items:center;gap:6px;background:var(--card);border:1px solid var(--line);
-       border-radius:8px;padding:4px 8px;font-size:12px;max-width:46%}
+       border-radius:8px;padding:5px 8px;font-size:12px;max-width:88%}
+  .att .kt{font-size:9.5px;letter-spacing:.4px;color:var(--mut);border:1px solid var(--line);
+        border-radius:4px;padding:1px 4px}
+  .att .ai{display:flex;flex-direction:column;min-width:0;line-height:1.3}
+  .att .an{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:44vw}
+  .att .as{font-size:10.5px;color:var(--mut);white-space:normal}
+  .att.ok{border-color:#26543f}
+  .att.bad{border-color:#6d2b33}
+  .att.bad .as{color:var(--bad)}
+  .att .split{font-size:10.5px;color:var(--acc);background:transparent;border:1px solid var(--line);
+        border-radius:6px;padding:2px 6px;margin-top:2px;align-self:flex-start}
   .att img{width:26px;height:26px;object-fit:cover;border-radius:4px}
   .att span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .att i{color:var(--bad);font-style:normal;padding:0 2px}
@@ -224,6 +234,7 @@
 
 <div id="toast"></div>
 
+<script src="pdf/pdf.min.js"></script>
 <script>
 const $ = s => document.querySelector(s);
 let cfg = {}, models = [], atts = [], busy = false, ctrl = null;
@@ -361,25 +372,128 @@ function tick(){
 setInterval(tick, 3000);
 
 /* ---------- вложения ---------- */
+function fmtB(n){ return !n ? '' : (n > 1048576 ? (n/1048576).toFixed(1)+' МБ' : Math.round(n/1024)+' КБ'); }
+function fmtN(n){ return (n||0).toLocaleString('ru-RU'); }
+function ctxSize(){ return cfg.ctx || 8192; }
+async function tokenCount(text){
+  const r = await fetch(api('/tokenize'), {method:'POST', headers:headers(), body:JSON.stringify({content:text})});
+  if(!r.ok) throw new Error('tokenize HTTP '+r.status);
+  const j = await r.json();
+  return (j.tokens||[]).length;
+}
+async function freeTokens(){
+  let used = 0;
+  if(history.length){
+    const all = history.map(m=>m.content).join('\n');
+    try{ used = await tokenCount(all); }catch(e){ used = Math.ceil(all.length/3); }
+  }
+  return ctxSize() - (cfg.maxTok||2048) - used;
+}
+function attStatus(a){
+  if(a.kind==='img') return {state:'', text:'фото, сжато до 1280 px JPEG'};
+  if(a.progress) return {state:'', text:a.progress};
+  if(a.error) return {state:'bad', text:'не прочитан: '+a.error};
+  let t = (a.detail||'') + (a.tokens ? ' · '+fmtN(a.tokens)+' ток.' : '');
+  if(!a.tokens || a.free==null) return {state:'', text:t||'читаю…'};
+  if(a.tokens <= a.free) return {state:'ok', text:t+' · влезает, свободно '+fmtN(a.free)};
+  const n = a.parts || Math.max(2, Math.ceil(a.tokens/(a.free*0.75)));
+  if(a.chunked) return {state:'ok', text:t+' · по частям: '+n+' вызовов'};
+  return {state:'bad', split:n, text:t+' · НЕ ВЛЕЗАЕТ, свободно '+fmtN(a.free)};
+}
 function renderAtts(){
   const bar = $('#attachBar'); bar.innerHTML='';
   bar.classList.toggle('show', atts.length>0);
   atts.forEach((a,i)=>{
-    const d = document.createElement('div'); d.className='att';
-    d.innerHTML = (a.kind==='img' ? '<img src="'+a.dataUrl+'">' : '📄') + '<span>'+a.name+'</span><i>✕</i>';
-    d.querySelector('i').onclick = () => { atts.splice(i,1); renderAtts(); };
+    const st = attStatus(a);
+    const d = document.createElement('div'); d.className = 'att '+(st.state||'');
+    if(a.kind==='img'){ const im=document.createElement('img'); im.src=a.dataUrl; d.appendChild(im); }
+    else { const k=document.createElement('span'); k.className='kt';
+           k.textContent = a.kind==='pdf' ? 'PDF' : (a.kind||'txt').toUpperCase(); d.appendChild(k); }
+    const box = document.createElement('div'); box.className='ai';
+    const nm = document.createElement('div'); nm.className='an'; nm.textContent = a.name; box.appendChild(nm);
+    const sm = document.createElement('div'); sm.className='as'; sm.textContent = st.text; box.appendChild(sm);
+    if(st.split){
+      const b = document.createElement('button'); b.className='split';
+      b.textContent = a.chunked ? 'вернуть одним куском' : 'разбить на '+st.split+' частей';
+      b.onclick = ev => { ev.stopPropagation(); a.chunked = !a.chunked; renderAtts(); };
+      box.appendChild(b);
+    }
+    d.appendChild(box);
+    const x = document.createElement('i'); x.textContent='✕';
+    x.onclick = () => { atts.splice(i,1); renderAtts(); };
+    d.appendChild(x);
     bar.appendChild(d);
   });
+}
+
+async function measureAtt(a){
+  try{
+    a.tokens = await tokenCount(a.text);
+    a.free = await freeTokens();
+    if(a.tokens > a.free) a.parts = Math.max(2, Math.ceil(a.tokens/(a.free*0.75)));
+  }catch(e){ a.free = null; }
+  a.progress = null; renderAtts();
+}
+
+/* PDF: pdf.js в WebView, байты забираем у нативного слоя порциями */
+async function pdfExtract(a){
+  try{
+    a.progress='загружаю pdf.js…'; renderAtts();
+    const pdfjs = window.pdfjsLib;
+    if(!pdfjs) throw new Error('pdf.js не загрузился');
+    pdfjs.GlobalWorkerOptions.workerSrc = 'pdf/pdf.worker.min.js';
+    const size = native.pdfSize();
+    if(!size) throw new Error('файл недоступен');
+    const bytes = new Uint8Array(size);
+    let off = 0;
+    while(off < size){
+      const b64 = native.pdfChunk(off, 512*1024);
+      if(!b64) break;
+      const bin = atob(b64);
+      const part = new Uint8Array(bin.length);
+      for(let i=0;i<bin.length;i++) part[i] = bin.charCodeAt(i);
+      bytes.set(part, off); off += part.length;
+      a.progress = 'читаю PDF… '+Math.round(off/size*100)+'%'; renderAtts();
+    }
+    const doc = await pdfjs.getDocument({data:bytes, isEvalSupported:false, useWorkerFetch:false}).promise;
+    let out = '';
+    for(let p=1; p<=doc.numPages; p++){
+      a.progress = 'извлекаю текст: страница '+p+' из '+doc.numPages; renderAtts();
+      const page = await doc.getPage(p);
+      const tc = await page.getTextContent();
+      let line = '', lastY = null;
+      for(const it of tc.items){
+        if(lastY!=null && Math.abs(it.transform[5]-lastY) > 2 && line.trim()){ out += line.trim()+'\n'; line=''; }
+        line += it.str;
+        lastY = it.transform[5];
+        if(it.hasEOL){ out += line.replace(/[ \t]+/g,' ').trim()+'\n'; line=''; }
+        else if(it.str && !it.str.endsWith(' ')) line += ' ';
+      }
+      if(line.trim()) out += line.trim()+'\n';
+      out += '\n';
+    }
+    a.pages = doc.numPages;
+    a.text = out.replace(/\n{3,}/g,'\n\n').trim();
+    if(!a.text) a.error = 'нет текстового слоя — это скан или картинки';
+    else a.detail = 'PDF, стран. '+doc.numPages+', символов '+a.text.length;
+  }catch(e){
+    a.error = 'PDF: '+(e && e.message ? e.message : e);
+  }
+  a.progress = null; renderAtts();
+  if(!a.error && a.text) await measureAtt(a);
 }
 
 window.__native = function(payload){
   let p={}; try{ p = JSON.parse(payload); }catch(e){ return; }
   if(p.event==='models'){ refreshModels(); toast('Список моделей обновлён'); return; }
-  if(p.event==='attach'){
-    if(p.error){ toast(p.error); return; }
-    atts.push(p); renderAtts();
-    toast(p.kind==='img' ? 'Фото добавлено' : 'Документ добавлен: '+Math.round((p.text||'').length/1000)+' тыс. симв.');
-  }
+  if(p.event!=='attach') return;
+  if(p.error){ toast((p.name?p.name+': ':'')+p.error); return; }
+  if(p.kind==='img'){ p.text=''; atts.push(p); renderAtts(); toast('Фото добавлено'); return; }
+  const a = {kind:p.kind, name:p.name, bytes:p.bytes};
+  atts.push(a); renderAtts();
+  if(p.kind==='pdf'){ pdfExtract(a); return; }
+  a.text = p.text; a.detail = p.detail; a.chars = p.chars;
+  measureAtt(a);
 };
 window.__back = function(){
   if($('#set').classList.contains('show')){ $('#set').classList.remove('show'); native.backConsumed(); return; }
@@ -402,6 +516,48 @@ function addUserMsg(text, imgs){
   $('#chat').appendChild(d); $('#chat').scrollTop = 1e9;
 }
 
+function splitText(t, max){
+  const out = [];
+  let cur = '';
+  for(const block of t.split(/\n{2,}/)){
+    if(cur && (cur.length + block.length) > max){ out.push(cur.trim()); cur = ''; }
+    let rest = block;
+    while(rest.length > max){
+      let cut = rest.lastIndexOf('\n', max);
+      if(cut < max*0.5) cut = rest.lastIndexOf('. ', max);
+      if(cut < max*0.5) cut = rest.lastIndexOf(' ', max);
+      if(cut < max*0.5) cut = max;
+      out.push(rest.slice(0, cut).trim()); rest = rest.slice(cut);
+    }
+    cur += (cur ? '\n\n' : '') + rest;
+  }
+  if(cur.trim()) out.push(cur.trim());
+  return out;
+}
+
+async function runChunks(a, onProgress){
+  const budget = Math.max(400, Math.floor((ctxSize() - (cfg.maxTok||2048)) * 0.7));
+  const charsPerTok = a.text.length / Math.max(1, a.tokens || 1);
+  const partChars = Math.max(800, Math.floor(budget * charsPerTok));
+  const parts = splitText(a.text, partChars);
+  a.parts = parts.length; a.chunked = true;
+  const notes = [];
+  for(let i=0; i<parts.length; i++){
+    onProgress('документ «'+a.name+'»: часть '+(i+1)+' из '+parts.length+' — извлекаю факты…');
+    const r = await fetch(api('/v1/chat/completions'), {method:'POST', headers:headers(), body:JSON.stringify({
+      messages:[
+        {role:'system', content:'Ты извлекаешь факты из части документа. Сохраняй цифры, даты, имена и формулировки дословно. Без вступлений и оценок.'},
+        {role:'user', content:'Часть '+(i+1)+' из '+parts.length+':\n\n'+parts[i]}],
+      stream:false, temperature:0.2, max_tokens:400,
+      chat_template_kwargs:{enable_thinking:false}})});
+    if(!r.ok) throw new Error('часть '+(i+1)+': HTTP '+r.status);
+    const j = await r.json();
+    notes.push((j.choices && j.choices[0] ? (j.choices[0].message.content||'') : '').trim());
+  }
+  onProgress('документ «'+a.name+'» обработан полностью, собираю ответ…');
+  return notes.map((n,i)=>'['+(i+1)+'/'+notes.length+'] '+n).join('\n');
+}
+
 async function send(){
   if(busy) return;
   const text = $('#in').value.trim();
@@ -411,15 +567,18 @@ async function send(){
   const imgs = atts.filter(a=>a.kind==='img');
   if(imgs.length && !vl){ toast('Фото понимает только VL-модель (LFM3-VL-2B). Сейчас выбрана текстовая.'); }
   const useImg = vl ? imgs.map(a=>a.dataUrl) : [];
+  const docs = atts.filter(a=>a.kind!=='img');
 
-  let content = text;
-  atts.filter(a=>a.kind==='doc').forEach(a=>{
-    const t = a.text.length > 12000 ? a.text.slice(0,12000)+'\n[…обрезано]' : a.text;
-    content = 'Документ «'+a.name+'»:\n```\n'+t+'\n```\n\n' + content;
-  });
+  const bad = docs.filter(a=>a.error || !a.text || (a.tokens > a.free && !a.chunked));
+  if(bad.length){
+    const a = bad[0];
+    toast(a.error ? (a.name+': '+a.error)
+      : (a.name+': '+fmtN(a.tokens)+' токенов не влезают в контекст (свободно '+fmtN(a.free)+
+         '). Разбей на части или увеличь контекст в настройках.'));
+    return;
+  }
 
-  const msgs = history.concat([{role:'user', content: content}]);
-  renderUser(content, useImg, text);
+  renderUser(text, useImg, text);
   $('#in').value=''; $('#in').style.height='42px';
   atts=[]; renderAtts();
 
@@ -427,49 +586,93 @@ async function send(){
   const reas = document.createElement('div'); reas.className='reas'; reas.style.display='none';
   out.insertBefore(reas, out.firstChild);
   const meta = document.createElement('div'); meta.className='meta'; out.appendChild(meta);
+  const setMain = t => { out.childNodes[out.childNodes.length-2].textContent = t; $('#chat').scrollTop=1e9; };
 
   busy = true; ctrl = new AbortController();
   $('#send').textContent='■'; $('#send').classList.add('stop');
-  const t0 = performance.now(); let nTok=0, acc='', rs='', firstAt=0;
+
   try{
+    let notes = [];
+    const chunked = docs.filter(a=>a.chunked);
+    for(const a of chunked) notes.push(await runChunks(a, setMain));
+
+    let content = text;
+    notes.forEach((n,i)=>{
+      content = 'Документ «'+chunked[i].name+'» обработан ПОЛНОСТЬЮ, частей: '+chunked[i].parts+
+        '. Выжимка по частям:\n```\n'+n+'\n```\n\n' + content;
+    });
+    docs.filter(a=>!a.chunked).forEach(a=>{
+      content = 'Документ «'+a.name+'»'+(a.detail?' ('+a.detail+')':'')+':\n```\n'+a.text+'\n```\n\n' + content;
+    });
+
+    setMain('…');
+    const msgs = history.concat([{role:'user', content: content}]);
     const body = {messages: msgs, stream: true, temperature: cfg.temp||0.7,
       max_tokens: cfg.maxTok||2048,
       chat_template_kwargs: {enable_thinking: cfg.think !== false, preserve_thinking: !!cfg.preserve}};
+    let autoBudget = 0;
     if(cfg.thinkBudget > 0) body.reasoning_budget_tokens = cfg.thinkBudget;
+    else if(body.chat_template_kwargs.enable_thinking){
+      // без явного лимита модель может сжечь весь ответ на «мысли» — режем до 40%
+      autoBudget = Math.max(128, Math.floor((cfg.maxTok||2048) * 0.4));
+      body.reasoning_budget_tokens = autoBudget;
+    }
     if(useImg.length){
       body.messages[body.messages.length-1] = {role:'user', content:
         [{type:'text', text: content||'Опиши изображение.'}].concat(useImg.map(u=>({type:'image_url', image_url:{url:u}})))};
     }
-    const r = await fetch(api('/v1/chat/completions'), {method:'POST', headers: headers(),
-      body: JSON.stringify(body), signal: ctrl.signal});
-    if(!r.ok){ throw new Error('HTTP '+r.status+' '+(await r.text()).slice(0,200)); }
-    const rd = r.body.getReader(); const dec = new TextDecoder(); let buf='';
-    while(true){
-      const {value, done} = await rd.read(); if(done) break;
-      buf += dec.decode(value, {stream:true});
-      const lines = buf.split('\n'); buf = lines.pop();
-      for(const line of lines){
-        if(!line.startsWith('data:')) continue;
-        const p = line.slice(5).trim(); if(p==='[DONE]') continue;
-        let j; try{ j = JSON.parse(p); }catch(e){ continue; }
-        const d = j.choices?.[0]?.delta || {};
-        if(d.reasoning_content){ rs += d.reasoning_content; if(!firstAt) firstAt=performance.now(); nTok++;
-          if(cfg.showReas !== false){ reas.style.display='block'; reas.textContent = rs; reas.scrollTop=1e9; } }
-        if(d.content){ acc += d.content; if(!firstAt) firstAt=performance.now(); nTok++;
-          out.childNodes[out.childNodes.length-2].textContent = acc; }
-        $('#chat').scrollTop = 1e9;
+
+    let nTok=0, acc='', rs='', firstAt=0, dt=0, retried=false;
+    const runStream = async () => {
+      nTok=0; acc=''; rs=''; firstAt=0;
+      const t0 = performance.now();
+      const r = await fetch(api('/v1/chat/completions'), {method:'POST', headers: headers(),
+        body: JSON.stringify(body), signal: ctrl.signal});
+      if(!r.ok){ throw new Error('HTTP '+r.status+' '+(await r.text()).slice(0,200)); }
+      const rd = r.body.getReader(); const dec = new TextDecoder(); let buf='';
+      while(true){
+        const {value, done} = await rd.read(); if(done) break;
+        buf += dec.decode(value, {stream:true});
+        const lines = buf.split('\n'); buf = lines.pop();
+        for(const line of lines){
+          if(!line.startsWith('data:')) continue;
+          const p = line.slice(5).trim(); if(p==='[DONE]') continue;
+          let j; try{ j = JSON.parse(p); }catch(e){ continue; }
+          const d = j.choices?.[0]?.delta || {};
+          if(d.reasoning_content){ rs += d.reasoning_content; if(!firstAt) firstAt=performance.now(); nTok++;
+            if(cfg.showReas !== false){ reas.style.display='block'; reas.textContent = rs; reas.scrollTop=1e9; } }
+          if(d.content){ acc += d.content; if(!firstAt) firstAt=performance.now(); nTok++;
+            setMain(acc); }
+        }
       }
+      return (performance.now()-t0)/1000;
+    };
+
+    dt = await runStream();
+    // все токены ушли в рассуждения — повторяем без них, а не отдаём пустоту
+    if(!acc.trim() && body.chat_template_kwargs.enable_thinking){
+      retried = true;
+      toast('Модель израсходовала все токены на рассуждения — повторяю без них');
+      body.chat_template_kwargs.enable_thinking = false;
+      reas.style.display = 'none';
+      setMain('повтор без рассуждений…');
+      dt += await runStream();
     }
-    const dt = (performance.now()-t0)/1000;
+
     lastRate = nTok/dt; lastTok = nTok;
-    meta.textContent = nTok+' ток · '+lastRate.toFixed(1)+' t/s · '+dt.toFixed(1)+' c';
+    if(!acc.trim()){
+      out.classList.add('err');
+      meta.textContent = 'пустой ответ: ' + nTok + ' ток за ' + dt.toFixed(1) + ' c — лимит сожгли рассуждения';
+    } else {
+      meta.textContent = nTok+' ток · '+lastRate.toFixed(1)+' t/s · '+dt.toFixed(1)+' c'
+        + (retried ? ' · без рассуждений' : '') + (autoBudget ? ' · рассуждения ≤'+autoBudget : '');
+    }
     history.push({role:'user', content: content});
     history.push({role:'assistant', content: acc});
   }catch(e){
     if(e.name==='AbortError'){ meta.textContent='остановлено'; }
     else { out.classList.add('err'); meta.textContent = 'ошибка: '+e.message;
            toast('Движок не ответил: '+e.message); }
-    if(acc){ history.push({role:'assistant', content: acc}); }
   }finally{
     busy=false; ctrl=null; $('#send').textContent='➤'; $('#send').classList.remove('stop');
   }
