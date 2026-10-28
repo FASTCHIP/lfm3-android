@@ -6,6 +6,16 @@
 
 Проверено на Samsung Galaxy S22 Ultra (SM-S908E, Snapdragon 8 Gen 1, Adreno 730, 12 ГБ, Android 16).
 
+## Скриншоты
+
+| Чат | Модели и запуск |
+|---|---|
+| ![чат](docs/screens/01-chat.png) | ![модели](docs/screens/02-models.png) |
+
+| Рассуждения | Мониторинг |
+|---|---|
+| ![рассуждения](docs/screens/03-reasoning.png) | ![мониторинг](docs/screens/04-monitoring.png) |
+
 ## Что умеет
 
 - **Чат со стримингом**, отдельный сворачиваемый блок рассуждений, счётчик токенов в секунду.
