@@ -2,9 +2,13 @@
 
 Локальный LLM-движок для Android: [LiquidAI LFM3](https://huggingface.co/LiquidAI/LFM3-1.7B) (и её VL-версия) работает на телефоне без интернета, с настройками запуска, вложениями, сетевым доступом и мониторингом железа.
 
-Внутри — [llama.cpp](https://github.com/ggml-org/llama.cpp), собранный под arm64 с `dotprod+i8mm+bf16+fp16` и KleidiAI вместо обычной NDK-сборки. APK собирается без Gradle: `aapt2` + `javac` + `d8` + `apksigner`.
+Внутри — [llama.cpp](https://github.com/ggml-org/llama.cpp), собранный под arm64 универсально:
+несколько ISA-вариантов (`dotprod`/`i8mm`/SVE, KleidiAI) выбираются по железу в рантайме.
+APK собирается без Gradle: `aapt2` + `javac` + `d8` + `apksigner`.
 
-Проверено на Samsung Galaxy S22 Ultra (SM-S908E, Snapdragon 8 Gen 1, Adreno 730, 12 ГБ, Android 16).
+Проверено на Samsung Galaxy S22 Ultra (SM-S908E, Snapdragon 8 Gen 1, Adreno 730, 12 ГБ, Android 16)
+и POCO X3 NFC (M2007J20CG, Snapdragon 732G, Adreno 618, 6 ГБ, Android 15) — дефолты подбираются
+профилем устройства, движок один (ISA выбирается в рантайме).
 
 ## Скриншоты
 
@@ -15,6 +19,12 @@
 | Рассуждения | Мониторинг |
 |---|---|
 | ![рассуждения](docs/screens/03-reasoning.png) | ![мониторинг](docs/screens/04-monitoring.png) |
+
+**POCO X3 NFC** (профиль ROME виден в мониторинге, кластеров два — без PRIME и DDR):
+
+| Чат | Мониторинг X3 |
+|---|---|
+| ![чат X3](docs/screens/10-x3-chat.png) | ![мониторинг X3](docs/screens/11-x3-monitor.png) |
 
 | Документ обработан целиком | Не влезает → отказ с цифрами | Разбито на части |
 |---|---|---|
@@ -159,6 +169,10 @@ curl http://<ip>:8080/v1/chat/completions -H "Content-Type: application/json" -d
 3. **d8 из build-tools 34 падает с внутренним NPE на анонимных классах** — колбэки пишутся лямбдами или статическими вложенными классами.
 
 Ограничения: NPU Hexagon v69 не используется (в llama.cpp ядра HTP только с v73), GPU OpenCL ускоряет лишь промпт (52 t/s) и замедляет генерацию (7 t/s против 23 t/s у CPU), после 30 минут нагрузки prime-ядро упирается в 1,84 ГГц и выдача падает до ~6 t/s.
+
+POCO X3 NFC: 6 ГБ ОЗУ (контекст по умолчанию 8k; 32k с q8_0 KV+FA влезает), Adreno 618 не
+использовался — CPU с KleidiAI быстрее OpenCL-пути, у Hexagon v68 ядер HTP в llama.cpp нет,
+после ~30 минут нагрузки A76 троттлится — видно в мониторинге.
 
 ## Лицензия
 
