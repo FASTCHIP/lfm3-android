@@ -107,7 +107,7 @@ public class Bridge {
             JSONObject cur = readCfg(act);
             JSONObject n = new JSONObject(json);
             for (String k : new String[]{"ctx", "threads", "kv", "fa", "np", "lan", "port", "key", "mmp",
-                    "model", "mmproj", "temp", "think", "preserve", "showReas", "maxTok", "thinkBudget"}) {
+                    "model", "mmproj", "temp", "think", "preserve", "showReas", "maxTok", "thinkBudget", "agent"}) {
                 if (n.has(k)) cur.put(k, n.get(k));
             }
             act.getSharedPreferences("cfg", 0).edit().putString("json", cur.toString()).apply();
@@ -115,6 +115,59 @@ public class Bridge {
         } catch (Exception e) {
             return false;
         }
+    }
+
+    // ---------- инструменты агента (поиск / страницы / SSH) ----------
+
+    @JavascriptInterface
+    public String webSearch(String q) {
+        try { return Tools.search(q); }
+        catch (Exception e) { return "{\"ok\":false,\"error\":\"" + Tools.jesc(String.valueOf(e)) + "\"}"; }
+    }
+
+    @JavascriptInterface
+    public String netFetch(String u) {
+        try { return Tools.fetch(u); }
+        catch (Exception e) { return "{\"ok\":false,\"error\":\"" + Tools.jesc(String.valueOf(e)) + "\"}"; }
+    }
+
+    // json: {"alias":"pve","cmd":"..."} — пароль хоста резолвится здесь, модель его не видит
+    @JavascriptInterface
+    public String sshExec(String j) {
+        try {
+            JSONObject o = new JSONObject(j);
+            String host = o.optString("host", ""), user = o.optString("user", "");
+            String pass = o.optString("password", o.optString("pass", ""));
+            int port = o.optInt("port", 0);
+            String alias = o.optString("alias", "");
+            if (!alias.isEmpty()) {
+                JSONArray hs = new JSONArray(act.getSharedPreferences("cfg", 0).getString("sshs", "[]"));
+                boolean found = false;
+                for (int i = 0; i < hs.length(); i++) {
+                    JSONObject h = hs.getJSONObject(i);
+                    if (h.optString("n").equals(alias)) {
+                        host = h.optString("h"); port = h.optInt("p", 22);
+                        user = h.optString("u"); pass = h.optString("w"); found = true; break;
+                    }
+                }
+                if (!found) return "{\"ok\":false,\"error\":\"нет сохранённого хоста «" + Tools.jesc(alias) + "»\"}";
+            }
+            if (host.isEmpty() || user.isEmpty())
+                return "{\"ok\":false,\"error\":\"нужны alias либо host+user\"}";
+            return Tools.sshExec(host, port, user, pass, o.optString("cmd", "echo ok"));
+        } catch (Exception e) {
+            return "{\"ok\":false,\"error\":\"" + Tools.jesc(String.valueOf(e)) + "\"}";
+        }
+    }
+
+    @JavascriptInterface
+    public void saveSshHosts(String j) {
+        act.getSharedPreferences("cfg", 0).edit().putString("sshs", j).apply();
+    }
+
+    @JavascriptInterface
+    public String getSshHosts() {
+        return act.getSharedPreferences("cfg", 0).getString("sshs", "[]");
     }
 
     // ---------- модели ----------

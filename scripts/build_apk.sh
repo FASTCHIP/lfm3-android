@@ -62,11 +62,21 @@ chmod 755 "$LIBS/libllamaserver.so"
   --min-sdk-version 29 --target-sdk-version 34 \
   --version-code "${VERSION_CODE:-1}" --version-name "${VERSION_NAME:-1.0}"
 
-"$JAVAC" -source 17 -target 17 -nowarn -classpath "$JAR" \
+"$JAVAC" -source 17 -target 17 -nowarn -classpath "$JAR;$ROOT/libs/jsch.jar" \
   -d "$BLD/classes" $(find "$ROOT/app/src" -name '*.java') 2>&1 \
   | grep -vE "bootstrap class path|deprecat" || true
 
-"$D8" --lib "$JAR" --min-api 29 --output "$BLD/dex" $(find "$BLD/classes" -name '*.class')
+# классы JSch → общий dex (агентский SSH без Gradle).
+# d8.bat из build-tools 34 (R8 8.2.2) падает NPE на байткоде jsch и упирается
+# в лимит командной строки cmd.exe; берём свежий standalone R8 и зовём прямо через java.
+python -c "import zipfile,sys; z=zipfile.ZipFile(sys.argv[1]); b=sys.argv[2]; [z.extract(n,b) for n in z.namelist() if n.endswith('.class') and not n.startswith('META-INF')]" "$ROOT/libs/jsch.jar" "$BLD/classes"
+R8="${R8_JAR:-$ANDROID_SDK/r8-8.5.35.jar}"
+if [ -f "$R8" ]; then
+  (cd "$BLD" && "$JAVA_HOME/bin/java" -cp "$(cygpath -m "$R8")" com.android.tools.r8.D8 \
+     --lib "$JAR" --min-api 29 --output dex $(cd classes && find . -name '*.class' | sed 's|^\./|classes/|'))
+else
+  (cd "$BLD" && "$D8" --lib "$JAR" --min-api 29 --output dex $(cd classes && find . -name '*.class' | sed 's|^\./|classes/|'))
+fi
 
 python - "$BLD/base.apk" "$BLD/dex/classes.dex" "$BLD/libs" <<'PY'
 import sys, zipfile, os

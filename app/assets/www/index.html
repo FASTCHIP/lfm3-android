@@ -113,6 +113,7 @@
     <div class="chip" id="cTemp">—°</div>
     <div class="chip" id="cTok">— t/s</div>
     <div class="chip" id="cNet">LAN</div>
+    <div class="chip" id="cAgent">агент off</div>
     <div class="chip" id="cEng">…</div>
   </div>
   <div id="gear">⚙</div>
@@ -220,6 +221,15 @@
       <div class="fld"><div>Порт</div><input type="number" id="inPort" value="8080"></div>
       <div class="fld"><div>API-ключ<small>пусто = без авторизации</small></div><input type="text" id="inKey" placeholder="не задан"></div>
       <div class="hint" id="netHint"></div>
+      <div class="fld"><div>SSH-серверы для агента<small>модель видит только имена; пароли хранятся здесь</small></div>
+        <div id="sshList"></div>
+        <input type="text" id="inSshN" placeholder="имя (alias)">
+        <input type="text" id="inSshH" placeholder="хост">
+        <input type="number" id="inSshP" placeholder="порт (22)">
+        <input type="text" id="inSshU" placeholder="пользователь">
+        <input type="password" id="inSshPw" placeholder="пароль">
+        <button id="bSshAdd">+ добавить сервер</button>
+      </div>
     </div>
 
     <div class="sec">
@@ -250,6 +260,7 @@ function headers(){ const h={'Content-Type':'application/json'};
 /* ---------- настройки ---------- */
 function loadCfg(){
   try{ cfg = JSON.parse(native.cfg()); }catch(e){ cfg = {}; }
+  drawAgentChip();
   $('#selKv').value = cfg.kv || 'q8_0';
   setSeg('#segCtx', String(cfg.ctx||32768));
   setSeg('#segThr', String(cfg.threads||4));
@@ -371,6 +382,71 @@ function tick(){
   }
 }
 setInterval(tick, 3000);
+
+/* ---------- агент: цикл инструментов через native tool_calls ---------- */
+function drawAgentChip(){ const c=$('#cAgent'); if(!c) return; c.textContent = cfg.agent ? 'агент' : 'агент off'; c.classList.toggle('on', !!cfg.agent); }
+$('#cAgent').onclick = () => { cfg.agent = !cfg.agent; native.setCfg(JSON.stringify(cfg)); drawAgentChip(); toast(cfg.agent?'Агент включён: модель будет вызывать инструменты':'Агент выключен'); };
+const TOOL_DEFS = [
+  {type:'function',function:{name:'web_search',description:'Поиск в интернете по запросу',parameters:{type:'object',properties:{query:{type:'string'}},required:['query']}}},
+  {type:'function',function:{name:'net_fetch',description:'Прочитать веб-страницу по URL целиком',parameters:{type:'object',properties:{url:{type:'string'}},required:['url']}}},
+  {type:'function',function:{name:'ssh_exec',description:'Выполнить команду по SSH на сохранённом сервере',parameters:{type:'object',properties:{alias:{type:'string',description:'имя сохранённого сервера'},cmd:{type:'string'}},required:['alias','cmd']}}}];
+async function agentLoop(text,setMain,out){
+  const reas=out.querySelector('.reas'), meta=out.querySelector('.meta');
+  let names=[]; try{ names=JSON.parse(native.getSshHosts()).map(h=>h.n); }catch(e){}
+  const sys='Ты — агент на телефоне с инструментами. Отвечай кратко по фактам из результатов инструментов; не выдумывай.'+
+    (names.length?(' Сохранённые SSH-серверы: '+names.join(', ')+'.'):' SSH-серверы не настроены.');
+  let msgs=[{role:'system',content:sys},{role:'user',content:text}], steps=0;
+  for(let i=0;i<8;i++){
+    setMain('думаю…');
+    const r=await fetch(api('/v1/chat/completions'),{method:'POST',headers:headers(),signal:ctrl?ctrl.signal:undefined,
+      body:JSON.stringify({messages:msgs,stream:false,temperature:Math.min(0.4,cfg.temp||0.7),max_tokens:512,tools:TOOL_DEFS,parallel_tool_calls:false,
+        chat_template_kwargs:{enable_thinking:false}})});
+    if(!r.ok) throw new Error('HTTP '+r.status+' '+(await r.text()).slice(0,150));
+    const m=(await r.json()).choices[0].message;
+    const calls=m.tool_calls||[];
+    if(!calls.length){ meta.textContent='агент · шагов: '+steps; return (m.content||'').trim(); }
+    msgs.push(m);
+    for(const c of calls){
+      steps++;
+      let a={}; try{ a=JSON.parse(c.function.arguments||'{}'); }catch(e){}
+      const name=c.function.name; let res,label;
+      if(name==='web_search'){ label='🔧 поиск: '+(a.query||''); setMain(label.slice(0,60)); res=native.webSearch(String(a.query||'')); }
+      else if(name==='net_fetch'){ label='🔧 страница: '+(a.url||''); setMain(label.slice(0,60)); res=native.netFetch(String(a.url||'')); }
+      else if(name==='ssh_exec'){ label='⇥ ssh '+(a.alias||a.host||'?')+': '+(a.cmd||'').slice(0,50); setMain(label.slice(0,60)); res=native.sshExec(JSON.stringify(a)); }
+      else { label='⚠ '+name; res='{\"ok\":false,\"error\":\"нет инструмента '+name+'\"}'; }
+      reas.style.display='block';
+      const d=document.createElement('details'); d.className='reas';
+      const sm=document.createElement('summary'); sm.textContent=label; d.appendChild(sm);
+      const pre=document.createElement('pre'); pre.style.whiteSpace='pre-wrap';
+      pre.textContent=res.length>1200?res.slice(0,1200)+'…':res; d.appendChild(pre);
+      reas.appendChild(d); $('#chat').scrollTop=1e9;
+      msgs.push({role:'tool', tool_call_id:c.id||'', name:name, content:(res.length>3200?res.slice(0,3200):res)});
+    }
+  }
+  meta.textContent='агент · лимит 8 шагов';
+  return 'Сделал 8 вызовов инструментов и не успел — уточни запрос покороче.';
+}
+
+/* ---------- SSH-хосты в настройках ---------- */
+/* ---------- SSH-хосты в настройках ---------- */
+function sshArr(){ try{ return JSON.parse(native.getSshHosts()); }catch(e){ return []; } }
+function renderSshList(){
+  const el=$('#sshList'); if(!el) return; el.innerHTML='';
+  for(const h of sshArr()){
+    const row=document.createElement('div'); row.style.cssText='display:flex;gap:6px;margin:4px 0;align-items:center';
+    const b=document.createElement('span'); b.style.flex='1'; b.textContent=h.n+' — '+h.h+':'+(h.p||22)+' ('+h.u+')'; row.appendChild(b);
+    const x=document.createElement('button'); x.textContent='✕';
+    x.onclick=()=>{ native.saveSshHosts(JSON.stringify(sshArr().filter(q=>q!==h))); renderSshList(); }; row.appendChild(x);
+    el.appendChild(row);
+  }
+}
+$('#bSshAdd').onclick = () => {
+  const n=$('#inSshN').value.trim(), hh=$('#inSshH').value.trim(), u=$('#inSshU').value.trim(), w=$('#inSshPw').value;
+  if(!n||!hh||!u){ toast('имя, хост и пользователь обязательны'); return; }
+  const arr=sshArr(); arr.push({n,h:hh,p:+($('#inSshP').value)||22,u,w});
+  native.saveSshHosts(JSON.stringify(arr)); renderSshList();
+  $('#inSshN').value=$('#inSshH').value=$('#inSshU').value=$('#inSshPw').value='';
+};
 
 /* ---------- вложения ---------- */
 function fmtB(n){ return !n ? '' : (n > 1048576 ? (n/1048576).toFixed(1)+' МБ' : Math.round(n/1024)+' КБ'); }
@@ -607,6 +683,12 @@ async function send(){
     });
 
     setMain('…');
+    if(cfg.agent && !useImg.length){
+      const res = await agentLoop(content, setMain, out);
+      setMain(res || 'Готово.');
+      history.push({role:'user', content}); history.push({role:'assistant', content:res});
+      return;
+    }
     const msgs = history.concat([{role:'user', content: content}]);
     const body = {messages: msgs, stream: true, temperature: cfg.temp||0.7,
       max_tokens: cfg.maxTok||2048,
@@ -697,7 +779,7 @@ $('#in').addEventListener('input', e => {
 $('#bDoc').onclick = () => { if(atts.length>=4) return toast('Максимум 4 вложения'); native.pickDoc(); };
 $('#bImg').onclick = () => { if(atts.length>=4) return toast('Максимум 4 вложения'); native.pickImage(); };
 $('#bNew').onclick = () => { history=[]; $('#chat').innerHTML=''; toast('Новый чат'); };
-$('#gear').onclick = () => { $('#set').classList.add('show'); refreshModels(); tick(); };
+$('#gear').onclick = () => { $('#set').classList.add('show'); refreshModels(); tick(); renderSshList(); };
 $('#setClose').onclick = () => { $('#set').classList.remove('show'); saveCfg(); };
 $('#bImport').onclick = () => native.importModel();
 $('#bRefresh').onclick = () => refreshModels();
