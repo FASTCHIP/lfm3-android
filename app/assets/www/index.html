@@ -387,14 +387,17 @@ setInterval(tick, 3000);
 function drawAgentChip(){ const c=$('#cAgent'); if(!c) return; c.textContent = cfg.agent ? 'агент' : 'агент off'; c.classList.toggle('on', !!cfg.agent); }
 $('#cAgent').onclick = () => { cfg.agent = !cfg.agent; native.setCfg(JSON.stringify(cfg)); drawAgentChip(); toast(cfg.agent?'Агент включён: модель будет вызывать инструменты':'Агент выключен'); };
 const TOOL_DEFS = [
-  {type:'function',function:{name:'web_search',description:'Поиск в интернете по запросу',parameters:{type:'object',properties:{query:{type:'string'}},required:['query']}}},
-  {type:'function',function:{name:'net_fetch',description:'Прочитать веб-страницу по URL целиком',parameters:{type:'object',properties:{url:{type:'string'}},required:['url']}}},
-  {type:'function',function:{name:'ssh_exec',description:'Выполнить команду по SSH на сохранённом сервере',parameters:{type:'object',properties:{alias:{type:'string',description:'имя сохранённого сервера'},cmd:{type:'string'}},required:['alias','cmd']}}}];
+  {type:'function',function:{name:'web_search',description:'Поиск в интернете; вернёт JSON ссылок {t,u,s}',parameters:{type:'object',properties:{query:{type:'string'}},required:['query']}}},
+  {type:'function',function:{name:'curl',description:'Скачать страницу/файл по URL; raw:true — отдать как есть',parameters:{type:'object',properties:{url:{type:'string'},raw:{type:'boolean'}},required:['url']}}},
+  {type:'function',function:{name:'ping',description:'Проверить доступность хоста ICMP с телефона',parameters:{type:'object',properties:{host:{type:'string'},count:{type:'integer'}},required:['host']}}},
+  {type:'function',function:{name:'ls',description:'Список файлов в каталоге; без alias — на телефоне, с alias — на SSH-сервере',parameters:{type:'object',properties:{path:{type:'string'},alias:{type:'string'}},required:['path']}}},
+  {type:'function',function:{name:'cat',description:'Прочитать файл (до 32 КБ); без alias — на телефоне, с alias — на SSH-сервере',parameters:{type:'object',properties:{path:{type:'string'},alias:{type:'string'}},required:['path']}}},
+  {type:'function',function:{name:'shell',description:'Команда shell; без alias — на телефоне (ограниченно), с alias — на SSH-сервере',parameters:{type:'object',properties:{cmd:{type:'string'},alias:{type:'string'}},required:['cmd']}}}];
 async function agentLoop(text,setMain,out){
   const reas=out.querySelector('.reas'), meta=out.querySelector('.meta');
   let names=[]; try{ names=JSON.parse(native.getSshHosts()).map(h=>h.n); }catch(e){}
-  const sys='Ты — агент на телефоне с инструментами. Отвечай кратко по фактам из результатов инструментов; не выдумывай.'+
-    (names.length?(' Сохранённые SSH-серверы: '+names.join(', ')+'.'):' SSH-серверы не настроены.');
+  const sys='Ты — агент на Android-телефоне с инструментами. Отвечай кратко и строго по фактам из результатов инструментов; не выдумывай.'+
+    ' Если результата одного инструмента не хватает — вызови следующий (например, web_search, потом curl лучшей ссылки).'+' Сохранённые SSH-серверы: '+(names.length?names.join(', '):'нет')+'.';
   let msgs=[{role:'system',content:sys},{role:'user',content:text}], steps=0;
   for(let i=0;i<8;i++){
     setMain('думаю…');
@@ -410,10 +413,12 @@ async function agentLoop(text,setMain,out){
       steps++;
       let a={}; try{ a=JSON.parse(c.function.arguments||'{}'); }catch(e){}
       const name=c.function.name; let res,label;
-      if(name==='web_search'){ label='🔧 поиск: '+(a.query||''); setMain(label.slice(0,60)); res=native.webSearch(String(a.query||'')); }
-      else if(name==='net_fetch'){ label='🔧 страница: '+(a.url||''); setMain(label.slice(0,60)); res=native.netFetch(String(a.url||'')); }
-      else if(name==='ssh_exec'){ label='⇥ ssh '+(a.alias||a.host||'?')+': '+(a.cmd||'').slice(0,50); setMain(label.slice(0,60)); res=native.sshExec(JSON.stringify(a)); }
-      else { label='⚠ '+name; res='{\"ok\":false,\"error\":\"нет инструмента '+name+'\"}'; }
+      if(name==='web_search') label='🔧 поиск: '+(a.query||'');
+      else if(name==='curl') label='🔧 curl: '+(a.url||'');
+      else if(name==='ping') label='⇅ ping: '+(a.host||'');
+      else label='⚙ '+name+(a.alias?' @'+a.alias:'')+': '+String(a.path||a.cmd||'').slice(0,50);
+      setMain(label.slice(0,60));
+      res=native.tool(name, JSON.stringify(a));
       reas.style.display='block';
       const d=document.createElement('details'); d.className='reas';
       const sm=document.createElement('summary'); sm.textContent=label; d.appendChild(sm);
@@ -427,6 +432,7 @@ async function agentLoop(text,setMain,out){
   return 'Сделал 8 вызовов инструментов и не успел — уточни запрос покороче.';
 }
 
+/* ---------- SSH-хосты в настройках ---------- */
 /* ---------- SSH-хосты в настройках ---------- */
 /* ---------- SSH-хосты в настройках ---------- */
 function sshArr(){ try{ return JSON.parse(native.getSshHosts()); }catch(e){ return []; } }

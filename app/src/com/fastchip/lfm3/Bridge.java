@@ -117,44 +117,25 @@ public class Bridge {
         }
     }
 
-    // ---------- инструменты агента (поиск / страницы / SSH) ----------
+    // ---------- инструменты агента: единая точка входа ----------
 
+    // name: web_search|curl|ping|ls|cat|shell; argsJson — плоский {"k":"v"}.
+    // Пароль SSH-хоста резолвится здесь по alias — модель его не видит.
     @JavascriptInterface
-    public String webSearch(String q) {
-        try { return Tools.search(q); }
-        catch (Exception e) { return "{\"ok\":false,\"error\":\"" + Tools.jesc(String.valueOf(e)) + "\"}"; }
-    }
-
-    @JavascriptInterface
-    public String netFetch(String u) {
-        try { return Tools.fetch(u); }
-        catch (Exception e) { return "{\"ok\":false,\"error\":\"" + Tools.jesc(String.valueOf(e)) + "\"}"; }
-    }
-
-    // json: {"alias":"pve","cmd":"..."} — пароль хоста резолвится здесь, модель его не видит
-    @JavascriptInterface
-    public String sshExec(String j) {
+    public String tool(String name, String argsJson) {
         try {
-            JSONObject o = new JSONObject(j);
-            String host = o.optString("host", ""), user = o.optString("user", "");
-            String pass = o.optString("password", o.optString("pass", ""));
-            int port = o.optInt("port", 0);
-            String alias = o.optString("alias", "");
-            if (!alias.isEmpty()) {
-                JSONArray hs = new JSONArray(act.getSharedPreferences("cfg", 0).getString("sshs", "[]"));
-                boolean found = false;
-                for (int i = 0; i < hs.length(); i++) {
-                    JSONObject h = hs.getJSONObject(i);
-                    if (h.optString("n").equals(alias)) {
-                        host = h.optString("h"); port = h.optInt("p", 22);
-                        user = h.optString("u"); pass = h.optString("w"); found = true; break;
+            return Tools.run(name, Tools.parseArgs(argsJson), alias -> {
+                try {
+                    JSONArray hs = new JSONArray(act.getSharedPreferences("cfg", 0).getString("sshs", "[]"));
+                    for (int i = 0; i < hs.length(); i++) {
+                        JSONObject h = hs.getJSONObject(i);
+                        if (h.optString("n").equals(alias)) return new String[]{
+                            h.optString("h"), String.valueOf(h.optInt("p", 22)),
+                            h.optString("u"), h.optString("w")};
                     }
-                }
-                if (!found) return "{\"ok\":false,\"error\":\"нет сохранённого хоста «" + Tools.jesc(alias) + "»\"}";
-            }
-            if (host.isEmpty() || user.isEmpty())
-                return "{\"ok\":false,\"error\":\"нужны alias либо host+user\"}";
-            return Tools.sshExec(host, port, user, pass, o.optString("cmd", "echo ok"));
+                } catch (Exception ignored) {}
+                return null;
+            });
         } catch (Exception e) {
             return "{\"ok\":false,\"error\":\"" + Tools.jesc(String.valueOf(e)) + "\"}";
         }
