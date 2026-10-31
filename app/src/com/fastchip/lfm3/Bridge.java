@@ -32,6 +32,7 @@ import java.net.NetworkInterface;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 
 /** Мост между WebView-интерфейсом и нативным слоем. */
 public class Bridge {
@@ -124,7 +125,29 @@ public class Bridge {
     @JavascriptInterface
     public String tool(String name, String argsJson) {
         try {
-            return Tools.run(name, Tools.parseArgs(argsJson), alias -> {
+            Map<String, Object> a = Tools.parseArgs(argsJson);
+            if ("ssh_list".equals(name)) return getSshHosts();
+            if ("ssh_add".equals(name)) {
+                String alias = String.valueOf(a.getOrDefault("alias", ""));
+                if (alias.isEmpty() || a.get("host") == null || a.get("user") == null)
+                    return "{\"ok\":false,\"error\":\"нужны alias, host, user, pass\"}";
+                JSONArray hs = new JSONArray(act.getSharedPreferences("cfg", 0).getString("sshs", "[]"));
+                JSONObject upd = null;
+                for (int i = 0; i < hs.length(); i++) {
+                    JSONObject h = hs.getJSONObject(i);
+                    if (h.optString("n").equals(alias)) { upd = h; break; }
+                }
+                if (upd == null) { upd = new JSONObject(); try { upd.put("n", alias); hs.put(upd); } catch (Exception ignored) {} }
+                try {
+                    upd.put("h", String.valueOf(a.get("host")));
+                    upd.put("u", String.valueOf(a.get("user")));
+                    Object p2 = a.get("port"); upd.put("p", p2 == null ? 22 : Integer.parseInt(String.valueOf(p2)));
+                    Object pw = a.get("pass"); if (pw != null) upd.put("w", String.valueOf(pw));
+                } catch (Exception ignored) {}
+                saveSshHosts(hs.toString());
+                return "{\"ok\":true,\"saved\":\"" + Tools.jesc(alias) + "\"}";
+            }
+            return Tools.run(name, a, alias -> {
                 try {
                     JSONArray hs = new JSONArray(act.getSharedPreferences("cfg", 0).getString("sshs", "[]"));
                     for (int i = 0; i < hs.length(); i++) {
