@@ -126,7 +126,16 @@ public class Bridge {
     public String tool(String name, String argsJson) {
         try {
             Map<String, Object> a = Tools.parseArgs(argsJson);
-            if ("ssh_list".equals(name)) return getSshHosts();
+            if ("ssh_list".equals(name)) {
+                JSONArray hs = new JSONArray(act.getSharedPreferences("cfg", 0).getString("sshs", "[]"));
+                JSONArray out = new JSONArray();
+                for (int i = 0; i < hs.length(); i++) {
+                    JSONObject h = hs.getJSONObject(i);
+                    out.put(new JSONObject().put("n", h.optString("n")).put("h", h.optString("h"))
+                        .put("p", h.optInt("p", 22)).put("u", h.optString("u")));
+                }
+                return out.toString();
+            }
             if ("ssh_add".equals(name)) {
                 String alias = String.valueOf(a.getOrDefault("alias", ""));
                 if (alias.isEmpty() || a.get("host") == null || a.get("user") == null)
